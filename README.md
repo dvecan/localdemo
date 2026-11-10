@@ -1,71 +1,73 @@
 # Local Demo
 
-App para macOS que sirve una o varias carpetas con webs estáticas y las comparte con cualquier dispositivo conectado a tu misma red (móvil, tablet, otro ordenador). Arrastras las carpetas, pulsas **Iniciar** y escaneas el código QR con el móvil, sin usar Terminal.
+A macOS app that serves one or more folders of static websites and shares them with any device on your network (phone, tablet, another computer). Drop the folders in, click **Start** and scan the QR code with your phone, no Terminal needed.
 
-![Ventana de Local Demo con una carpeta activa, su código QR y otras carpetas listas para iniciar](docs/captura.png)
+![Local Demo window with a running folder, its QR code and other folders ready to start](docs/captura.png)
 
-## Qué hace
+## Features
 
-- Añade carpetas arrastrándolas a la ventana o eligiéndolas desde la tarjeta «Añadir carpeta», una o varias a la vez.
-- Muestra cada carpeta como una tarjeta en un carrusel horizontal, con su propio puerto (8000, 8001, 8002… por defecto, editables desde el menú «…»).
-- Inicia y detiene cada carpeta por separado.
-- Cuando una carpeta está activa, muestra su código QR, su dirección de red (por ejemplo `http://192.168.1.15:8000`) para copiarla y un botón para abrirla en el navegador.
-- Si el puerto elegido ya está ocupado (por otra carpeta, otra app u otra persona que use este Mac), usa automáticamente el siguiente libre y lo avisa en la tarjeta.
-- Permite proteger cada carpeta con una contraseña (menú «…» > «Poner contraseña…»). Quien abra la web verá una página para escribirla.
-- No sirve nunca archivos ocultos (`.git`, `.env`, `.DS_Store`…) ni archivos de fuera de la carpeta a través de enlaces simbólicos.
-- Recuerda la lista de carpetas y sus puertos, y detiene todos los servidores al cerrar la ventana.
-- Se adapta al modo claro y al oscuro.
+- Add folders by dropping them on the window or choosing them from the “Add folder” card, one or several at a time.
+- Shows each folder as a card in a horizontal carousel, with its own port (8000, 8001, 8002… by default, editable from the “…” menu).
+- Start and stop each folder separately.
+- While a folder is running, its card shows a QR code, its network address (for example `http://192.168.1.15:8000`) to copy, and buttons to open it in the browser or share it.
+- If the chosen port is already taken (by another folder, another app or another user of this Mac), it switches to the next free one and says so on the card.
+- Give each folder its own name (double-click the title, or “…” > “Rename…”) without renaming it on disk.
+- Protect each folder with a password (“…” > “Set Password…”). Visitors see a page where they enter it.
+- Never serves hidden files (`.git`, `.env`, `.DS_Store`…) or files outside the folder through symbolic links.
+- Remembers the folders and their ports, and stops every server when you close the window.
+- Supports light and dark mode.
+- Available in English, Spanish and Catalan. The app follows your Mac’s language: Catalan if it’s Catalan, Spanish if it’s Spanish or another language of Spain (Galician, Basque…), English otherwise. The password page uses the same language as the app.
 
-## Requisitos
+## Requirements
 
-- macOS 14 (Sonoma) o posterior.
-- Command Line Tools de Xcode, que incluyen `swiftc` y `python3`. Si no las tienes:
+- macOS 14 (Sonoma) or later.
+- Xcode Command Line Tools, which include `swiftc` and `python3`. If you don’t have them:
 
   ```bash
   xcode-select --install
   ```
 
-## Compilar e instalar
+## Build and install
 
-1. Clona el repositorio y entra en la carpeta.
-2. Ejecuta el script de compilación. Compila la app y la instala en `~/Applications`, sustituyendo la versión anterior si existe:
+1. Clone the repository and open its folder.
+2. Run the build script. It builds the app and installs it in `~/Applications`, replacing any previous version:
 
    ```bash
    ./build.sh
    ```
 
-### Primera ejecución
+### First launch
 
-- Si macOS pregunta si permites conexiones entrantes a Python, pulsa **Permitir**. Si no, los demás dispositivos no podrán conectarse.
-- Los dispositivos deben estar en la misma Wi‑Fi. Algunas redes de invitados o corporativas bloquean el tráfico entre dispositivos.
+- If macOS asks whether to allow incoming connections for Python, click **Allow**. Otherwise other devices can’t connect.
+- Devices must be on the same Wi‑Fi. Some guest and corporate networks block traffic between devices.
 
-## Cómo funciona
+## How it works
 
-La app es una interfaz en SwiftUI sobre el servidor web que incluye Python (`http.server`). Cada carpeta lanza su propio proceso de `/usr/bin/python3` con un pequeño servidor incluido en `LocalDemoApp.swift`, que añade la contraseña y los bloqueos de archivos ocultos. Si la app se cierra de golpe, los servidores se detienen solos.
+The app is a SwiftUI interface on top of Python’s built-in web server (`http.server`). Each folder runs its own `/usr/bin/python3` process with a small server included in `LocalDemoApp.swift`, which adds the password and blocks hidden files. If the app quits unexpectedly, the servers stop by themselves.
 
-Cada Mac usa sus propios puertos: si varias personas usan Local Demo en sus Macs, todas pueden usar el 8000 a la vez sin conflicto, porque cada Mac tiene su propia dirección.
+Each Mac has its own ports: if several people use Local Demo on their Macs, all of them can use port 8000 at the same time without conflict, because each Mac has its own address.
 
-| Archivo | Contenido |
+| File | Contents |
 |---|---|
-| `LocalDemoApp.swift` | Toda la app: ventana, gestión del servidor, IP local y código QR |
-| `logo.png` | Logo de la app |
-| `make_icon.swift` | Convierte el logo en el icono de macOS (forma redondeada y margen) |
-| `Info.plist` | Nombre, identificador y versión de la app |
-| `build.sh` | Compila, genera el icono, firma la app en local y la instala en `~/Applications` |
-| `docs/` | Capturas de pantalla para este README |
+| `LocalDemoApp.swift` | The whole app: window, server management, local IP, QR code and texts in each language |
+| `logo.png` | App logo |
+| `make_icon.swift` | Turns the logo into the macOS icon (rounded shape and margin) |
+| `Info.plist` | App name, identifier, version and languages |
+| `build.sh` | Builds the app, generates the icon, signs it locally and installs it in `~/Applications` |
+| `docs/` | Screenshots for this README |
 
-Para probar sin tocar la interfaz, define `LOCALDEMO_AUTOSTART=1` y la app empezará a servir todas las carpetas guardadas al abrirse.
+To test without using the interface, set `LOCALDEMO_AUTOSTART=1` and the app starts serving every saved folder when it opens. To force a language, set `LOCALDEMO_LANG` to `en`, `es` or `ca`.
 
-## Seguridad
+## Security
 
-Local Demo está pensada para enseñar trabajo en curso en una red de confianza, durante un rato. Ten en cuenta lo siguiente, sobre todo en una oficina:
+Local Demo is meant for showing work in progress on a trusted network, for a short while. Keep the following in mind, especially in an office:
 
-- **Cualquiera en la misma red puede abrir la web** si conoce o adivina la dirección. Sin contraseña, todo lo que hay en la carpeta es visible para esa red. Sirve solo la carpeta del proyecto, nunca tu carpeta personal ni el escritorio entero.
-- **La conexión no está cifrada (HTTP, no HTTPS).** La contraseña y las páginas viajan sin cifrar por la wifi, así que alguien con las herramientas adecuadas en la misma red podría verlas. La contraseña evita miradas casuales, no ataques. No compartas así contenido confidencial (datos de clientes, credenciales, producto sin anunciar en redes de invitados).
-- **La contraseña se guarda sin cifrar** en las preferencias de la app. Usa una contraseña solo para esto (el botón «Generar» crea una) y no reutilices una personal.
-- **Detén los servidores al terminar.** Mientras están activos, la carpeta está abierta en la red.
-- **Revisa las normas de tu empresa.** Algunas redes corporativas no permiten servidores en los portátiles, o bloquean el tráfico entre dispositivos.
+- **Anyone on the same network can open the site** if they know or guess the address. Without a password, everything in the folder is visible to that network. Serve only the project folder, never your home folder or your whole desktop.
+- **The connection isn’t encrypted (HTTP, not HTTPS).** The password and the pages travel unencrypted over the Wi‑Fi, so someone with the right tools on the same network could see them. The password stops casual visitors, not attacks. Don’t share confidential content this way (customer data, credentials, unannounced products on guest networks).
+- **The password is stored unencrypted** in the app’s preferences. Use a password just for this (the “Generate” button creates one) and don’t reuse a personal one.
+- **Stop the servers when you’re done.** While they’re running, the folder is open on the network.
+- **Check your company’s rules.** Some corporate networks don’t allow servers on laptops, or block traffic between devices.
 
-## Licencia
+## License
 
-[PolyForm Noncommercial 1.0.0](LICENSE.md). Puedes usar, copiar y modificar este proyecto con cualquier fin no comercial. No está permitido usarlo con fines comerciales.
+[PolyForm Noncommercial 1.0.0](LICENSE.md). You can use, copy and modify this project for any noncommercial purpose. Commercial use isn’t allowed.

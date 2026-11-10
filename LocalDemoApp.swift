@@ -15,6 +15,7 @@ struct LocalDemoApp: App {
             ContentView()
                 .environmentObject(store)
                 .tint(Brand.accent)
+                .focusEffectDisabled()   // our pink focus ring replaces the system's blue one
         }
         .windowResizability(.contentSize)
         .windowStyle(.hiddenTitleBar)
@@ -26,6 +27,45 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         MainActor.assumeIsolated { SiteStore.shared.stopAll() }
+    }
+}
+
+// MARK: - Language
+
+/// Catalan for Catalan; Spanish for Spanish (Spain and Latin America) and the other languages
+/// of Spain; English for everything else. LOCALDEMO_LANG=es|ca|en forces one (for screenshots).
+enum AppLanguage: String {
+    case es, ca, en
+
+    static let current: AppLanguage = {
+        if let forced = ProcessInfo.processInfo.environment["LOCALDEMO_LANG"], let lang = AppLanguage(rawValue: forced) {
+            return lang
+        }
+        let code = Locale.preferredLanguages.first
+            .flatMap { Locale(identifier: $0).language.languageCode?.identifier } ?? "en"
+        return from(code)
+    }()
+
+    static func from(_ code: String) -> AppLanguage {
+        switch code {
+        case "ca": return .ca
+        case "es", "gl", "eu", "ast", "an": return .es
+        default: return .en
+        }
+    }
+}
+
+/// Reads a status message aloud with VoiceOver (it isn't focused, so it would otherwise be missed).
+@MainActor func announce(_ text: String) {
+    AccessibilityNotification.Announcement(text).post()
+}
+
+/// Text in the app's language.
+func tr(_ es: String, ca: String, en: String) -> String {
+    switch AppLanguage.current {
+    case .es: return es
+    case .ca: return ca
+    case .en: return en
     }
 }
 
@@ -42,7 +82,9 @@ final class Site: ObservableObject, Identifiable {
     /// Empty means no password. Saved in the app preferences (not encrypted).
     @Published var password: String { didSet { SiteStore.shared.save() } }
     @Published private(set) var isRunning = false
-    @Published private(set) var errorMessage: String?
+    @Published private(set) var errorMessage: String? {
+        didSet { if let errorMessage { announce(errorMessage) } }   // read errors aloud (WCAG 4.1.3)
+    }
     @Published private(set) var networkURL: String?
     @Published private(set) var requestCount = 0
     /// Short-lived note, e.g. when the chosen port was busy and another one was used.
@@ -75,20 +117,20 @@ final class Site: ObservableObject, Identifiable {
         errorMessage = nil
         guard !isRunning else { return }
         guard FileManager.default.fileExists(atPath: folder.path) else {
-            errorMessage = "La carpeta ya no existe. Elige otra desde el menú «…»."
+            errorMessage = tr("La carpeta ya no existe. Elige otra desde el menú «…».", ca: "La carpeta ja no existeix. Tria'n una altra des del menú «…».", en: "This folder no longer exists. Choose another one from the “…” menu.")
             return
         }
-        guard var port else { errorMessage = "El puerto debe ser un número entre 1024 y 65535."; return }
+        guard var port else { errorMessage = tr("El puerto debe ser un número entre 1024 y 65535.", ca: "El port ha de ser un número entre 1024 i 65535.", en: "The port must be a number between 1024 and 65535."); return }
 
         // If the port is taken (by another folder here, another app or another user of this Mac),
         // move to the next free one instead of failing.
         let takenHere = { (p: Int) in SiteStore.shared.sites.contains { $0 !== self && $0.isRunning && $0.port == p } }
         if takenHere(port) || !PortProbe.isFree(port) {
             guard let free = PortProbe.firstFree(after: port, excluding: takenHere) else {
-                errorMessage = "No hay puertos libres a partir del \(port)."
+                errorMessage = tr("No hay puertos libres a partir del \(port).", ca: "No hi ha ports lliures a partir del \(port).", en: "No free ports from \(port) onwards.")
                 return
             }
-            showNotice("\(port) ocupado · usando \(free)")
+            showNotice(tr("\(port) ocupado · usando \(free)", ca: "\(port) ocupat · fent servir \(free)", en: "\(port) busy · using \(free)"))
             port = free
             portText = String(free)
         }
@@ -101,6 +143,7 @@ final class Site: ObservableObject, Identifiable {
         env["LD_DIR"] = folder.path
         env["LD_PORT"] = String(port)
         env["LD_NAME"] = name
+        env["LD_LANG"] = AppLanguage.current.rawValue   // pages in the same language as the app
         env["LD_PASSWORD"] = password   // environment, not arguments: other users can't read it with `ps`
         p.environment = env
         p.currentDirectoryURL = folder
@@ -144,7 +187,7 @@ final class Site: ObservableObject, Identifiable {
             isRunning = true
             networkURL = SiteStore.localIPAddress().map { "http://\($0):\(port)" }
         } catch {
-            errorMessage = "No se pudo iniciar el servidor: \(error.localizedDescription)"
+            errorMessage = tr("No se pudo iniciar el servidor: \(error.localizedDescription)", ca: "No s'ha pogut iniciar el servidor: \(error.localizedDescription)", en: "Couldn't start the server: \(error.localizedDescription)")
         }
     }
 
@@ -160,6 +203,7 @@ final class Site: ObservableObject, Identifiable {
 
     private func showNotice(_ text: String) {
         notice = text
+        announce(text)
         DispatchQueue.main.asyncAfter(deadline: .now() + 6) { [weak self] in
             if self?.notice == text { self?.notice = nil }
         }
@@ -167,16 +211,16 @@ final class Site: ObservableObject, Identifiable {
 
     private func friendlyError(from stderr: String) -> String {
         if stderr.contains("Address already in use") {
-            return "El puerto \(portText) ya está en uso por otra app. Prueba con otro."
+            return tr("El puerto \(portText) ya está en uso por otra app. Prueba con otro.", ca: "Una altra app ja fa servir el port \(portText). Prova'n un altre.", en: "Port \(portText) is already used by another app. Try another one.")
         }
         if stderr.contains("Permission denied") {
-            return "Sin permiso para usar ese puerto o carpeta."
+            return tr("Sin permiso para usar ese puerto o carpeta.", ca: "No hi ha permís per fer servir aquest port o carpeta.", en: "No permission to use that port or folder.")
         }
         if stderr.contains("xcode-select") || stderr.contains("developer tools") {
-            return "Falta python3. Instala las Command Line Tools con: xcode-select --install"
+            return tr("Falta python3. Instala las Command Line Tools con: xcode-select --install", ca: "Falta python3. Instal·la les Command Line Tools amb: xcode-select --install", en: "python3 is missing. Install the Command Line Tools with: xcode-select --install")
         }
-        let lastLine = stderr.split(separator: "\n").last.map(String.init) ?? "Error desconocido"
-        return "El servidor se ha detenido: \(lastLine)"
+        let lastLine = stderr.split(separator: "\n").last.map(String.init) ?? tr("Error desconocido", ca: "Error desconegut", en: "Unknown error")
+        return tr("El servidor se ha detenido: \(lastLine)", ca: "El servidor s'ha aturat: \(lastLine)", en: "The server stopped: \(lastLine)")
     }
 }
 
@@ -339,7 +383,7 @@ enum PortProbe {
 /// - never serves hidden files or folders (.git, .env, .DS_Store…) nor files outside the folder
 ///   through symbolic links;
 /// - folder listings without hidden files; no caching, so devices always see the latest version.
-/// Settings come from the environment: LD_DIR, LD_PORT, LD_NAME, LD_PASSWORD.
+/// Settings come from the environment: LD_DIR, LD_PORT, LD_NAME, LD_PASSWORD, LD_LANG.
 enum LocalServer {
     static let script = #"""
 import hmac, html, io, os, re, secrets, sys, threading, time, urllib.parse
@@ -357,9 +401,28 @@ FAILS = {}
 LOCK = threading.Lock()
 SAFE_NEXT = re.compile(r"^/(?!/)[^\\\r\n]*$")
 
+# Pages use the app's language (LD_LANG): Catalan, Spanish or English.
+TEXT = {
+    "es": {"protected": "Protegida con contraseña", "intro": "Escribe la contraseña para ver esta web.",
+           "password": "Contraseña", "enter": "Entrar", "wrong": "Contraseña incorrecta.",
+           "too_many": "Demasiados intentos. Espera un minuto.", "parent": "↑ Carpeta superior",
+           "item": "elemento", "items": "elementos", "not_found": "No encontrado"},
+    "ca": {"protected": "Protegida amb contrasenya", "intro": "Escriu la contrasenya per veure aquest web.",
+           "password": "Contrasenya", "enter": "Entra", "wrong": "Contrasenya incorrecta.",
+           "too_many": "Massa intents. Espera un minut.", "parent": "↑ Carpeta superior",
+           "item": "element", "items": "elements", "not_found": "No s'ha trobat"},
+    "en": {"protected": "Password protected", "intro": "Enter the password to view this site.",
+           "password": "Password", "enter": "Continue", "wrong": "Wrong password.",
+           "too_many": "Too many attempts. Wait a minute.", "parent": "↑ Parent folder",
+           "item": "item", "items": "items", "not_found": "Not found"},
+}
+
+
+LANG = os.environ.get("LD_LANG", "en") if os.environ.get("LD_LANG") in TEXT else "en"
+
 STYLE = """
-:root{color-scheme:light dark;--bg:#fff;--card:#F3F1F1;--fg:#1d1d1f;--muted:#6e6e73;--field:#fff;--line:rgba(0,0,0,.12)}
-@media (prefers-color-scheme:dark){:root{--bg:#1A1A1C;--card:#2A2A2D;--fg:#f5f5f7;--muted:#a1a1a6;--field:#1A1A1C;--line:rgba(255,255,255,.14)}}
+:root{color-scheme:light dark;--bg:#fff;--card:#F3F1F1;--fg:#1d1d1f;--muted:#5f5f64;--field:#fff;--line:rgba(0,0,0,.12);--border:rgba(0,0,0,.45);--accent:#C63A61;--error:#C4161C}
+@media (prefers-color-scheme:dark){:root{--bg:#1A1A1C;--card:#2A2A2D;--fg:#f5f5f7;--muted:#a1a1a6;--field:#1A1A1C;--line:rgba(255,255,255,.14);--border:rgba(255,255,255,.45);--error:#FF6B61}}
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.45 -apple-system,BlinkMacSystemFont,"Helvetica Neue",Arial,sans-serif}
 .card{background:var(--card);border-radius:20px;padding:24px}
@@ -370,27 +433,31 @@ a{color:inherit}
 """
 
 LOGIN_PAGE = """<!doctype html>
-<html lang="es"><head><meta charset="utf-8">
+<html lang="{{LANG}}"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{{NAME}}</title><style>{{STYLE}}
 body{min-height:100vh;display:grid;place-items:center;padding:16px}
 form{width:100%;max-width:340px}
-input{width:100%;font:inherit;padding:12px 14px;border-radius:12px;border:1px solid var(--line);background:var(--field);color:var(--fg)}
-button{margin-top:12px;width:100%;font:inherit;font-weight:600;padding:12px;border:0;border-radius:999px;background:#D94870;color:#fff;cursor:pointer}
-.error{color:#e5484d;font-size:13px;margin:10px 0 0}
+label{display:block;font-size:13px;font-weight:600;margin:0 0 6px}
+input{width:100%;font:inherit;padding:12px 14px;border-radius:12px;border:1px solid var(--border);background:var(--field);color:var(--fg)}
+input:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+button{margin-top:12px;width:100%;font:inherit;font-weight:600;padding:12px;border:0;border-radius:999px;background:var(--accent);color:#fff;cursor:pointer}
+button:focus-visible{outline:2px solid var(--fg);outline-offset:2px}
+.error{color:var(--error);font-size:13px;margin:10px 0 0}
 </style></head><body>
 <form class="card" method="post" action="/__localdemo/login">
-<div class="label">Protegida con contraseña</div>
+<div class="label">{{PROTECTED}}</div>
 <h1>{{NAME}}</h1>
-<p>Escribe la contraseña para ver esta web.</p>
-<input type="password" name="password" placeholder="Contraseña" aria-label="Contraseña" autocomplete="current-password" autofocus required>
+<p>{{INTRO}}</p>
+<label for="password">{{PASSWORD}}</label>
+<input type="password" id="password" name="password" autocomplete="current-password" autofocus required{{INVALID}}>
 <input type="hidden" name="next" value="{{NEXT}}">
 {{ERROR}}
-<button type="submit">Entrar</button>
+<button type="submit">{{ENTER}}</button>
 </form></body></html>"""
 
 LIST_PAGE = """<!doctype html>
-<html lang="es"><head><meta charset="utf-8">
+<html lang="{{LANG}}"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{{TITLE}}</title><style>{{STYLE}}
 body{padding:32px 16px}
@@ -418,6 +485,12 @@ class Handler(SimpleHTTPRequestHandler):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=ROOT, **kwargs)
+
+    def lang(self):
+        return LANG
+
+    def text(self, key):
+        return TEXT[LANG][key]
 
     def end_headers(self):
         self.send_header("Cache-Control", "no-store")
@@ -448,7 +521,7 @@ class Handler(SimpleHTTPRequestHandler):
             self.login_page(HTTPStatus.UNAUTHORIZED, "", self.path)
             return False
         if self.forbidden_path():
-            self.send_error(HTTPStatus.NOT_FOUND, "No encontrado")
+            self.send_error(HTTPStatus.NOT_FOUND, self.text("not_found"))
             return False
         return True
 
@@ -478,7 +551,7 @@ class Handler(SimpleHTTPRequestHandler):
         with LOCK:
             count, until = FAILS.get(ip, (0, 0))
         if time.time() < until:
-            self.login_page(HTTPStatus.TOO_MANY_REQUESTS, "Demasiados intentos. Espera un minuto.", target)
+            self.login_page(HTTPStatus.TOO_MANY_REQUESTS, self.text("too_many"), target)
             return
 
         if hmac.compare_digest(given.encode("utf-8"), PASSWORD.encode("utf-8")):
@@ -497,15 +570,18 @@ class Handler(SimpleHTTPRequestHandler):
         with LOCK:
             FAILS[ip] = (0, time.time() + 60) if count >= 5 else (count, 0)
         time.sleep(1)
-        self.login_page(HTTPStatus.UNAUTHORIZED, "Contraseña incorrecta.", target)
+        self.login_page(HTTPStatus.UNAUTHORIZED, self.text("wrong"), target)
 
     def login_page(self, status, error, target):
         if not SAFE_NEXT.match(target):
             target = "/"
-        body = fill(LOGIN_PAGE,
+        body = fill(LOGIN_PAGE, LANG=self.lang(),
+                    PROTECTED=self.text("protected"), INTRO=self.text("intro"),
+                    PASSWORD=self.text("password"), ENTER=self.text("enter"),
                     NAME=html.escape(NAME),
                     NEXT=html.escape(target, quote=True),
-                    ERROR='<p class="error" role="alert">%s</p>' % html.escape(error) if error else "")
+                    INVALID=' aria-invalid="true" aria-describedby="error"' if error else "",
+                    ERROR='<p class="error" id="error" role="alert">%s</p>' % html.escape(error) if error else "")
         # Browsers may keep copies saved while this address was public (e.g. by an earlier version
         # or a run without password) and show them without asking. Tell them to drop those copies.
         self.send_html(status, body, {"Clear-Site-Data": '"cache"'})
@@ -528,17 +604,17 @@ class Handler(SimpleHTTPRequestHandler):
             names = sorted((n for n in os.listdir(path) if not n.startswith(".")
                             and os.path.realpath(os.path.join(path, n)).startswith(ROOT + os.sep)), key=str.lower)
         except OSError:
-            self.send_error(HTTPStatus.NOT_FOUND, "No encontrado")
+            self.send_error(HTTPStatus.NOT_FOUND, self.text("not_found"))
             return None
         shown = urllib.parse.unquote(urllib.parse.urlsplit(self.path).path)
         items = []
         if shown != "/":
-            items.append('<li><a href="../">↑ Carpeta superior</a></li>')
+            items.append('<li><a href="../">%s</a></li>' % self.text("parent"))
         for name in names:
             label = name + ("/" if os.path.isdir(os.path.join(path, name)) else "")
             items.append('<li><a href="%s">%s</a></li>' % (urllib.parse.quote(label), html.escape(label)))
-        count = "%d %s" % (len(names), "elemento" if len(names) == 1 else "elementos")
-        data = fill(LIST_PAGE, NAME=html.escape(NAME), TITLE=html.escape(shown),
+        count = "%d %s" % (len(names), self.text("item") if len(names) == 1 else self.text("items"))
+        data = fill(LIST_PAGE, LANG=self.lang(), NAME=html.escape(NAME), TITLE=html.escape(shown),
                     COUNT=count, ITEMS="".join(items)).encode("utf-8")
         self.send_response(HTTPStatus.OK)
         self.send_header("Content-Type", "text/html; charset=utf-8")
@@ -563,13 +639,102 @@ ThreadingHTTPServer(("0.0.0.0", PORT), Handler).serve_forever()
 // MARK: - QR
 
 enum QRCode {
-    static func image(for string: String) -> NSImage? {
+    /// QR with a soft, rounded look: modules join into rounded shapes and the three
+    /// corner markers are rounded squares. Uses error correction "Q" to stay easy to scan.
+    /// No white margin is drawn: the white box around the image acts as the margin.
+    @MainActor private static var cache: [String: NSImage] = [:]
+
+    /// Cached per address, since cards redraw often (e.g. on every visit).
+    @MainActor static func image(for string: String) -> NSImage? {
+        if let cached = cache[string] { return cached }
+        let image = draw(string, moduleSize: 20)
+        cache[string] = image
+        return image
+    }
+
+    static func draw(_ string: String, moduleSize: CGFloat) -> NSImage? {
+        guard let matrix = modules(for: string) else { return nil }
+        let n = matrix.count
+        let side = CGFloat(n) * moduleSize
+        let image = NSImage(size: NSSize(width: side, height: side), flipped: true) { _ in
+            guard let ctx = NSGraphicsContext.current?.cgContext else { return false }
+            ctx.setFillColor(CGColor(srgbRed: 1, green: 1, blue: 1, alpha: 1))
+            ctx.fill(CGRect(x: 0, y: 0, width: side, height: side))
+            ctx.setFillColor(CGColor(srgbRed: 0, green: 0, blue: 0, alpha: 1))
+            let m = moduleSize
+            func dark(_ r: Int, _ c: Int) -> Bool { r >= 0 && c >= 0 && r < n && c < n && matrix[r][c] }
+            func inFinder(_ r: Int, _ c: Int) -> Bool {
+                (r < 7 && c < 7) || (r < 7 && c >= n - 7) || (r >= n - 7 && c < 7)
+            }
+
+            // Data modules: round each outer corner whose two neighbours on that side are empty.
+            let radius = m * 0.5
+            for r in 0..<n {
+                for c in 0..<n where matrix[r][c] && !inFinder(r, c) {
+                    let rect = CGRect(x: CGFloat(c) * m, y: CGFloat(r) * m, width: m, height: m)
+                    let up = dark(r - 1, c), down = dark(r + 1, c), left = dark(r, c - 1), right = dark(r, c + 1)
+                    ctx.addPath(roundedRect(rect,
+                                            topLeft: !up && !left ? radius : 0,
+                                            topRight: !up && !right ? radius : 0,
+                                            bottomRight: !down && !right ? radius : 0,
+                                            bottomLeft: !down && !left ? radius : 0))
+                }
+            }
+            ctx.fillPath()
+
+            // Corner markers: rounded 7×7 ring with a rounded 3×3 centre.
+            for (r, c) in [(0, 0), (0, n - 7), (n - 7, 0)] {
+                let outer = CGRect(x: CGFloat(c) * m, y: CGFloat(r) * m, width: 7 * m, height: 7 * m)
+                let ring = CGMutablePath()
+                ring.addRoundedRect(in: outer, cornerWidth: 2.2 * m, cornerHeight: 2.2 * m)
+                ring.addRoundedRect(in: outer.insetBy(dx: m, dy: m), cornerWidth: 1.4 * m, cornerHeight: 1.4 * m)
+                ctx.addPath(ring)
+                ctx.fillPath(using: .evenOdd)
+                ctx.addPath(CGPath(roundedRect: outer.insetBy(dx: 2 * m, dy: 2 * m),
+                                   cornerWidth: 1.1 * m, cornerHeight: 1.1 * m, transform: nil))
+                ctx.fillPath()
+            }
+            return true
+        }
+        return image
+    }
+
+    /// The QR as a grid of dark (true) / light (false) modules, without the quiet zone.
+    private static func modules(for string: String) -> [[Bool]]? {
         let filter = CIFilter.qrCodeGenerator()
         filter.message = Data(string.utf8)
-        filter.correctionLevel = "M"
-        guard let output = filter.outputImage?.transformed(by: CGAffineTransform(scaleX: 12, y: 12)),
+        filter.correctionLevel = "Q"
+        guard let output = filter.outputImage,
               let cg = CIContext().createCGImage(output, from: output.extent) else { return nil }
-        return NSImage(cgImage: cg, size: NSSize(width: output.extent.width, height: output.extent.height))
+        let w = cg.width, h = cg.height
+        var pixels = [UInt8](repeating: 255, count: w * h)
+        guard let ctx = CGContext(data: &pixels, width: w, height: h, bitsPerComponent: 8, bytesPerRow: w,
+                                  space: CGColorSpaceCreateDeviceGray(), bitmapInfo: CGImageAlphaInfo.none.rawValue)
+        else { return nil }
+        ctx.draw(cg, in: CGRect(x: 0, y: 0, width: w, height: h))
+        // Rows in memory go top to bottom; trim the generator's white margin.
+        let grid = (0..<h).map { y in (0..<w).map { x in pixels[y * w + x] < 128 } }
+        guard let top = grid.firstIndex(where: { $0.contains(true) }),
+              let bottom = grid.lastIndex(where: { $0.contains(true) }),
+              let left = (0..<w).first(where: { x in grid.contains { $0[x] } }),
+              let right = (0..<w).last(where: { x in grid.contains { $0[x] } }) else { return nil }
+        return (top...bottom).map { y in Array(grid[y][left...right]) }
+    }
+
+    private static func roundedRect(_ r: CGRect, topLeft: CGFloat, topRight: CGFloat,
+                                    bottomRight: CGFloat, bottomLeft: CGFloat) -> CGPath {
+        let p = CGMutablePath()
+        p.move(to: CGPoint(x: r.minX + topLeft, y: r.minY))
+        p.addLine(to: CGPoint(x: r.maxX - topRight, y: r.minY))
+        if topRight > 0 { p.addArc(tangent1End: CGPoint(x: r.maxX, y: r.minY), tangent2End: CGPoint(x: r.maxX, y: r.maxY), radius: topRight) }
+        p.addLine(to: CGPoint(x: r.maxX, y: r.maxY - bottomRight))
+        if bottomRight > 0 { p.addArc(tangent1End: CGPoint(x: r.maxX, y: r.maxY), tangent2End: CGPoint(x: r.minX, y: r.maxY), radius: bottomRight) }
+        p.addLine(to: CGPoint(x: r.minX + bottomLeft, y: r.maxY))
+        if bottomLeft > 0 { p.addArc(tangent1End: CGPoint(x: r.minX, y: r.maxY), tangent2End: CGPoint(x: r.minX, y: r.minY), radius: bottomLeft) }
+        p.addLine(to: CGPoint(x: r.minX, y: r.minY + topLeft))
+        if topLeft > 0 { p.addArc(tangent1End: CGPoint(x: r.minX, y: r.minY), tangent2End: CGPoint(x: r.maxX, y: r.minY), radius: topLeft) }
+        p.closeSubpath()
+        return p
     }
 }
 
@@ -590,7 +755,8 @@ enum Brand {
     }
 
     /// Colour of the main call to action (Iniciar / Elegir). The only coloured element in the UI.
-    static let accent = Color(nsColor: hex(0xD94870))
+    /// Slightly deeper than the logo pink (D94870) so white text on it reaches WCAG AA (5:1).
+    static let accent = Color(nsColor: hex(0xC63A61))
     static let onAccent = Color.white
 
     /// White page with warm light-grey cards, as in the reference.
@@ -599,6 +765,72 @@ enum Brand {
 
     /// Neutral fill for secondary pills and controls.
     static let pillFill = adaptive(light: NSColor(white: 0, alpha: 0.07), dark: NSColor(white: 1, alpha: 0.10))
+    /// Hover versions: a bit darker grey, and a slightly deeper accent.
+    static let pillHover = adaptive(light: NSColor(white: 0, alpha: 0.12), dark: NSColor(white: 1, alpha: 0.16))
+    static let accentHover = Color(nsColor: hex(0xB5325A))
+    /// Pink for text links: dark enough on light backgrounds, light enough on dark ones (≥ 4.5:1).
+    static let accentText = adaptive(light: hex(0xB5325A), dark: hex(0xF08AA2))
+    static let accentTextHover = adaptive(light: hex(0x9E2A4E), dark: hex(0xF7A3B7))
+
+    /// Secondary text, a little darker than the system grey so it reaches 4.5:1 on cards and popovers.
+    static let secondaryText = adaptive(light: NSColor(white: 0, alpha: 0.6), dark: NSColor(white: 1, alpha: 0.6))
+    /// Error text with ≥ 4.5:1 contrast in both modes.
+    static let errorText = adaptive(light: hex(0xC4161C), dark: hex(0xFF6B61))
+    /// Text field border with ≥ 3:1 contrast, so the field is visible without focus.
+    static let fieldBorder = adaptive(light: NSColor(white: 0, alpha: 0.45), dark: NSColor(white: 1, alpha: 0.45))
+}
+
+/// Keyboard focus indicator: a 2 pt ring in the link pink (≥ 4.9:1 on every background, light and dark),
+/// drawn by our button styles instead of the system's blue ring (WCAG 2.4.7).
+/// Apply it to the Button itself: inside a ButtonStyle, SwiftUI on macOS doesn't report the button's focus.
+struct FocusRing<S: Shape>: ViewModifier {
+    let shape: S
+    @FocusState private var focused: Bool
+
+    func body(content: Content) -> some View {
+        content
+            .focused($focused)
+            .overlay {
+                if focused {
+                    shape.stroke(Brand.accentText, lineWidth: 2).padding(-3).allowsHitTesting(false)
+                }
+            }
+    }
+}
+
+/// Same ring for a Menu's label, where the environment does carry the focus.
+struct MenuFocusRing<S: Shape>: ViewModifier {
+    let shape: S
+    @Environment(\.isFocused) private var isFocused
+
+    func body(content: Content) -> some View {
+        content.overlay {
+            if isFocused { shape.stroke(Brand.accentText, lineWidth: 2).padding(-3).allowsHitTesting(false) }
+        }
+    }
+}
+
+extension View {
+    func focusRing<S: Shape>(_ shape: S) -> some View { modifier(FocusRing(shape: shape)) }
+}
+
+/// Plain button (no background) with a pressed state.
+struct PlainPressStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label.opacity(configuration.isPressed ? 0.7 : 1)
+    }
+}
+
+/// Tracks the pointer over a button so styles can show a hover state.
+private struct HoverReader<Content: View>: View {
+    @ViewBuilder var content: (Bool) -> Content
+    @State private var hovering = false
+
+    var body: some View {
+        content(hovering)
+            .onHover { hovering = $0 }
+            .animation(.easeOut(duration: 0.12), value: hovering)
+    }
 }
 
 /// Rounded pill button: accent fill for the main action, neutral grey otherwise.
@@ -610,22 +842,53 @@ struct PillButtonStyle: ButtonStyle {
     @Environment(\.isEnabled) private var isEnabled
 
     func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .font(.system(size: compact ? 12 : 13, weight: .semibold))
-            .lineLimit(1)
-            .fixedSize()
-            .padding(.horizontal, compact ? 12 : 18)
-            .padding(.vertical, compact ? 5 : 8)
-            .foregroundStyle(kind == .prominent ? Brand.onAccent : Color.primary)
-            .background(background, in: Capsule())
-            .opacity(isEnabled ? (configuration.isPressed ? 0.75 : 1) : 0.4)
-            .contentShape(Capsule())
+        HoverReader { hovering in
+            configuration.label
+                .font(.system(size: compact ? 12 : 13, weight: .semibold))
+                .lineLimit(1)
+                .fixedSize()
+                .padding(.horizontal, compact ? 12 : 18)
+                .padding(.vertical, compact ? 5 : 8)
+                .foregroundStyle(kind == .prominent ? Brand.onAccent : Color.primary)
+                .background(background(hovering && isEnabled), in: Capsule())
+                .opacity(isEnabled ? (configuration.isPressed ? 0.75 : 1) : 0.4)
+                .contentShape(Capsule())
+        }
     }
 
-    private var background: Color {
+    private func background(_ hovering: Bool) -> Color {
         switch kind {
-        case .prominent: return Brand.accent
-        case .neutral: return Brand.pillFill
+        case .prominent: return hovering ? Brand.accentHover : Brand.accent
+        case .neutral: return hovering ? Brand.pillHover : Brand.pillFill
+        }
+    }
+}
+
+/// Round grey icon button (open in browser, share, carousel arrows).
+struct CircleButtonStyle: ButtonStyle {
+    var size: CGFloat = 34
+
+    func makeBody(configuration: Configuration) -> some View {
+        HoverReader { hovering in
+            configuration.label
+                .font(.system(size: size > 32 ? 13 : 12, weight: .semibold))
+                .foregroundStyle(Color.primary)
+                .frame(width: size, height: size)
+                .background(hovering ? Brand.pillHover : Brand.pillFill, in: Circle())
+                .opacity(configuration.isPressed ? 0.75 : 1)
+                .contentShape(Circle())
+        }
+    }
+}
+
+/// Quiet text button (e.g. "Limpiar"): grey, darker on hover.
+struct QuietButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        HoverReader { hovering in
+            configuration.label
+                .foregroundStyle(hovering ? Color.primary : Brand.secondaryText)
+                .opacity(configuration.isPressed ? 0.6 : 1)
+                .contentShape(Rectangle())
         }
     }
 }
@@ -633,16 +896,21 @@ struct PillButtonStyle: ButtonStyle {
 /// Text link in the CTA colour (instead of the system blue).
 struct LinkStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .font(.caption.weight(.medium))
-            .foregroundStyle(Brand.accent)
-            .opacity(configuration.isPressed ? 0.6 : 1)
-            .contentShape(Rectangle())
+        HoverReader { hovering in
+            configuration.label
+                .font(.caption.weight(.medium))
+                .underline(hovering)
+                .foregroundStyle(hovering ? Brand.accentTextHover : Brand.accentText)
+                .opacity(configuration.isPressed ? 0.6 : 1)
+                .contentShape(Rectangle())
+        }
     }
 }
 
 /// Text field with a neutral border that turns the CTA colour while typing (instead of the blue focus ring).
 struct BrandField: View {
+    /// Name read by VoiceOver (the panel title shown above the field).
+    let label: String
     let placeholder: String
     @Binding var text: String
     var onSubmit: () -> Void = {}
@@ -658,8 +926,9 @@ struct BrandField: View {
             .padding(.horizontal, 8)
             .padding(.vertical, 5)
             .background(Color(nsColor: .textBackgroundColor), in: shape)
-            .overlay(shape.strokeBorder(focused ? Brand.accent : Color.secondary.opacity(0.3), lineWidth: focused ? 1.5 : 1))
+            .overlay(shape.strokeBorder(focused ? Brand.accent : Brand.fieldBorder, lineWidth: focused ? 1.5 : 1))
             .tint(Brand.accent)
+            .accessibilityLabel(label)
             .onAppear { DispatchQueue.main.async { focused = true } }
     }
 }
@@ -694,7 +963,7 @@ struct ContentView: View {
             carousel
             footer
         }
-        .padding(.top, 44)       // room for the window buttons (hidden title bar)
+        .padding(.top, 22)       // just below the window buttons (hidden title bar)
         .padding(.bottom, 24)
         .frame(width: Self.windowWidth)
         .background(Brand.canvas)
@@ -713,13 +982,13 @@ struct ContentView: View {
             add(folders)
             return true
         } isTargeted: { isDropTarget = $0 }
-        .confirmationDialog("¿Quitar todas las carpetas?", isPresented: $confirmClear) {
-            Button("Quitar y detener", role: .destructive) { store.removeAll() }
-            Button("Cancelar", role: .cancel) {}
+        .confirmationDialog(tr("¿Quitar todas las carpetas?", ca: "Vols treure totes les carpetes?", en: "Remove all folders?"), isPresented: $confirmClear) {
+            Button(tr("Quitar y detener", ca: "Treu i atura", en: "Remove and Stop"), role: .destructive) { store.removeAll() }
+            Button(tr("Cancelar", ca: "Cancel·la", en: "Cancel"), role: .cancel) {}
         } message: {
             Text(runningCount == 1
-                 ? "Hay 1 servidor activo y se detendrá. Las carpetas no se borran del disco."
-                 : "Hay \(runningCount) servidores activos y se detendrán. Las carpetas no se borran del disco.")
+                 ? tr("Hay 1 servidor activo y se detendrá. Las carpetas no se borran del disco.", ca: "Hi ha 1 servidor actiu i s'aturarà. Les carpetes no s'esborren del disc.", en: "1 server is running and will be stopped. The folders aren't deleted from disk.")
+                 : tr("Hay \(runningCount) servidores activos y se detendrán. Las carpetas no se borran del disco.", ca: "Hi ha \(runningCount) servidors actius i s'aturaran. Les carpetes no s'esborren del disc.", en: "\(runningCount) servers are running and will be stopped. The folders aren't deleted from disk."))
         }
         .onAppear {
             DispatchQueue.main.async {
@@ -731,17 +1000,20 @@ struct ContentView: View {
     private var header: some View {
         HStack(alignment: .bottom) {
             VStack(alignment: .leading, spacing: 6) {
-                Text("Tus proyectos, en cualquier dispositivo local")
+                Text(tr("Tus páginas estáticas desde cualquier dispositivo", ca: "Les teves pàgines estàtiques des de qualsevol dispositiu", en: "Your static sites on any device"))
                     .font(.system(size: 26, weight: .semibold))
-                Text("Arrastra carpetas a esta ventana y visualízalas en cualquier dispositivo conectado a este wifi.")
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)   // longer languages (e.g. Catalan) shrink slightly instead of wrapping
+                    .accessibilityAddTraits(.isHeader)
+                Text(tr("Arrastra aquí tus proyectos y accede a ellos desde cualquier dispositivo conectado al mismo wifi.", ca: "Arrossega aquí els teus projectes i accedeix-hi des de qualsevol dispositiu connectat a la mateixa wifi.", en: "Drop your projects here and open them on any device connected to the same Wi‑Fi."))
                     .font(.system(size: 13))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Brand.secondaryText)
             }
             Spacer()
             if needsArrows {
                 HStack(spacing: 8) {
-                    arrowButton("chevron.left") { step(-1) }
-                    arrowButton("chevron.right") { step(1) }
+                    arrowButton("chevron.left", label: tr("Anterior", ca: "Anterior", en: "Previous")) { step(-1) }
+                    arrowButton("chevron.right", label: tr("Siguiente", ca: "Següent", en: "Next")) { step(1) }
                 }
                 .transition(.opacity)
             }
@@ -749,16 +1021,14 @@ struct ContentView: View {
         .padding(.horizontal, 32)
     }
 
-    private func arrowButton(_ symbol: String, action: @escaping () -> Void) -> some View {
+    private func arrowButton(_ symbol: String, label: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: symbol)
-                .font(.system(size: 12, weight: .semibold))
-                .frame(width: 32, height: 32)
-                .background(Brand.pillFill, in: Circle())
-                .contentShape(Circle())
         }
-        .buttonStyle(.plain)
-        .foregroundStyle(.primary)
+        .buttonStyle(CircleButtonStyle(size: 32))
+        .focusRing(Circle())
+        .help(label)
+        .accessibilityLabel(label)
     }
 
     private var carousel: some View {
@@ -793,23 +1063,24 @@ struct ContentView: View {
             Text(summary)
             Spacer()
             if !store.sites.isEmpty {
-                Button("Limpiar") {
+                Button(tr("Limpiar", ca: "Neteja", en: "Clear")) {
                     if runningCount > 0 { confirmClear = true } else { store.removeAll() }
                 }
-                .buttonStyle(.plain)
-                .help("Quitar todas las carpetas")
+                .buttonStyle(QuietButtonStyle())
+                .focusRing(RoundedRectangle(cornerRadius: 4, style: .continuous))
+                .help(tr("Quitar todas las carpetas", ca: "Treu totes les carpetes", en: "Remove all folders"))
             }
         }
         .font(.system(size: 12))
-        .foregroundStyle(.secondary)
+        .foregroundStyle(Brand.secondaryText)
         .padding(.horizontal, 32)
     }
 
     private var summary: String {
         let total = store.sites.count
-        if total == 0 { return "Sin carpetas todavía" }
-        let folders = total == 1 ? "1 carpeta" : "\(total) carpetas"
-        return runningCount == 0 ? folders : "\(folders) · \(runningCount) \(runningCount == 1 ? "activa" : "activas")"
+        if total == 0 { return tr("Sin carpetas todavía", ca: "Encara no hi ha carpetes", en: "No folders yet") }
+        let folders = total == 1 ? tr("1 carpeta", ca: "1 carpeta", en: "1 folder") : tr("\(total) carpetas", ca: "\(total) carpetes", en: "\(total) folders")
+        return runningCount == 0 ? folders : "\(folders) · \(runningCount) " + (runningCount == 1 ? tr("activa", ca: "activa", en: "running") : tr("activas", ca: "actives", en: "running"))
     }
 
     private var orderedIDs: [UUID] { store.sites.map(\.id) }
@@ -836,8 +1107,8 @@ struct ContentView: View {
         panel.canChooseDirectories = true
         panel.canChooseFiles = false
         panel.allowsMultipleSelection = true
-        panel.prompt = "Añadir"
-        panel.message = "Elige una o varias carpetas con tu web (por ejemplo, las que tienen un index.html)"
+        panel.prompt = tr("Añadir", ca: "Afegeix", en: "Add")
+        panel.message = tr("Elige una o varias carpetas con tu web (por ejemplo, las que tienen un index.html)", ca: "Tria una o més carpetes amb el teu web (per exemple, les que tenen un index.html)", en: "Choose one or more folders with your site (for example, ones with an index.html)")
         if panel.runModal() == .OK { add(panel.urls) }
     }
 }
@@ -848,6 +1119,7 @@ struct ContentView: View {
 struct Card<Content: View>: View {
     @ViewBuilder var content: () -> Content
     @State private var hovering = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         let shape = RoundedRectangle(cornerRadius: 20, style: .continuous)
@@ -856,10 +1128,11 @@ struct Card<Content: View>: View {
             .frame(width: ContentView.cardSize.width, height: ContentView.cardSize.height)
             .background(Brand.card, in: shape)
             .clipShape(shape)
-            .offset(y: hovering ? -2 : 0)
+            .offset(y: hovering && !reduceMotion ? -2 : 0)
             .shadow(color: .black.opacity(hovering ? 0.05 : 0), radius: 12, y: 6)
             .onHover { hovering = $0 }
             .animation(.easeOut(duration: 0.25), value: hovering)
+            .focusSection()   // Tab goes through one card completely before moving to the next
     }
 }
 
@@ -873,8 +1146,10 @@ struct SiteCard: View {
     @State private var portDraft = ""
     @State private var passwordDraft = ""
     @State private var editingName = false
+    @State private var hoveringMenu = false
     @State private var nameDraft = ""
     @State private var copied = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         Card {
@@ -891,11 +1166,11 @@ struct SiteCard: View {
             .padding(16)
         }
         .contextMenu {
-            Button("Cambiar nombre…", action: renameSite)
-            Button("Mostrar en Finder") { NSWorkspace.shared.activateFileViewerSelecting([site.folder]) }
-            Button("Cambiar carpeta…", action: changeFolder).disabled(site.isRunning)
+            Button(tr("Cambiar nombre…", ca: "Canvia el nom…", en: "Rename…"), action: renameSite)
+            Button(tr("Mostrar en Finder", ca: "Mostra al Finder", en: "Show in Finder")) { NSWorkspace.shared.activateFileViewerSelecting([site.folder]) }
+            Button(tr("Cambiar carpeta…", ca: "Canvia la carpeta…", en: "Change Folder…"), action: changeFolder).disabled(site.isRunning)
             Divider()
-            Button("Quitar de la lista") { SiteStore.shared.remove(site) }.disabled(site.isRunning)
+            Button(tr("Quitar de la lista", ca: "Treu de la llista", en: "Remove from List")) { SiteStore.shared.remove(site) }.disabled(site.isRunning)
         }
     }
 
@@ -903,37 +1178,67 @@ struct SiteCard: View {
         HStack(spacing: 8) {
             Image(systemName: site.isRunning ? "dot.radiowaves.left.and.right" : "folder")
                 .font(.system(size: 15, weight: .regular))
+                // The waves light up briefly when the server starts and on each visit. Short bursts (not an
+                // endless loop) keep it within WCAG 2.2.2, and it's off when Reduce Motion is on.
+                .symbolEffect(.variableColor.iterative.reversing, options: .repeat(2), value: activityPulse)
+                .symbolEffectsRemoved(reduceMotion)
+                .accessibilityHidden(true)   // the state is already said in text ("Activa · 3 visitas")
             if site.hasPassword {
                 Image(systemName: "lock.fill")
                     .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(.secondary)
-                    .help("Protegida con contraseña")
-                    .accessibilityLabel("Protegida con contraseña")
+                    .foregroundStyle(Brand.secondaryText)
+                    .help(tr("Protegida con contraseña", ca: "Protegida amb contrasenya", en: "Password protected"))
+                    .accessibilityLabel(tr("Protegida con contraseña", ca: "Protegida amb contrasenya", en: "Password protected"))
             }
             Spacer()
+            if site.isRunning, let url = site.shareURL, let link = URL(string: url) {
+                // Opens the site in the default browser.
+                Button { open(url) } label: {
+                    Image(systemName: "display")
+                }
+                .buttonStyle(CircleButtonStyle(size: 30))
+                .focusRing(Circle())
+                .help(tr("Abrir en el navegador", ca: "Obre al navegador", en: "Open in browser"))
+                .accessibilityLabel(tr("Abrir en el navegador", ca: "Obre al navegador", en: "Open in browser"))
+
+                // Native macOS share menu (AirDrop, Mensajes, Mail, Notas…) with the address.
+                ShareLink(item: link) {
+                    Image(systemName: "square.and.arrow.up")
+                }
+                .buttonStyle(CircleButtonStyle(size: 30))
+                .focusRing(Circle())
+                .help(tr("Compartir dirección", ca: "Comparteix l'adreça", en: "Share address"))
+                .accessibilityLabel(tr("Compartir dirección", ca: "Comparteix l'adreça", en: "Share address"))
+            }
             if !site.isRunning {
                 Menu {
-                    Button("Cambiar nombre…", action: renameSite)
-                    Button("Cambiar puerto…") { portDraft = site.portText; editingPort = true }
-                    Button(site.hasPassword ? "Cambiar contraseña…" : "Poner contraseña…") {
+                    Button(tr("Cambiar nombre…", ca: "Canvia el nom…", en: "Rename…"), action: renameSite)
+                    Button(tr("Cambiar puerto…", ca: "Canvia el port…", en: "Change Port…")) { portDraft = site.portText; editingPort = true }
+                    Button(site.hasPassword ? tr("Cambiar contraseña…", ca: "Canvia la contrasenya…", en: "Change Password…") : tr("Poner contraseña…", ca: "Posa una contrasenya…", en: "Set Password…")) {
                         passwordDraft = site.password; editingPassword = true
                     }
-                    Button("Mostrar en Finder") { NSWorkspace.shared.activateFileViewerSelecting([site.folder]) }
-                    Button("Cambiar carpeta…", action: changeFolder)
+                    Button(tr("Mostrar en Finder", ca: "Mostra al Finder", en: "Show in Finder")) { NSWorkspace.shared.activateFileViewerSelecting([site.folder]) }
+                    Button(tr("Cambiar carpeta…", ca: "Canvia la carpeta…", en: "Change Folder…"), action: changeFolder)
                     Divider()
-                    Button("Quitar de la lista") { SiteStore.shared.remove(site) }
+                    Button(tr("Quitar de la lista", ca: "Treu de la llista", en: "Remove from List")) { SiteStore.shared.remove(site) }
                 } label: {
                     Image(systemName: "ellipsis")
                         .font(.system(size: 13, weight: .semibold))
-                        .frame(width: 22, height: 18)
-                        .contentShape(Rectangle())
+                        .frame(width: 28, height: 28)
+                        .background(hoveringMenu ? Brand.pillFill : .clear, in: Circle())
+                        .foregroundStyle(hoveringMenu ? Color.primary : Brand.secondaryText)
+                        .contentShape(Circle())
+                        .modifier(MenuFocusRing(shape: Circle()))
+                        .onHover { hoveringMenu = $0 }
+                        .animation(.easeOut(duration: 0.12), value: hoveringMenu)
                 }
                 .menuStyle(.button)
                 .buttonStyle(.plain)
                 .menuIndicator(.hidden)
                 .fixedSize()
-                .foregroundStyle(.secondary)
-                .help("Opciones")
+                .foregroundStyle(Brand.secondaryText)
+                .help(tr("Opciones", ca: "Opcions", en: "Options"))
+                .accessibilityLabel(tr("Opciones de \(site.name)", ca: "Opcions de \(site.name)", en: "Options for \(site.name)"))
                 .popover(isPresented: $editingPort, arrowEdge: .bottom) { portEditor }
             }
         }
@@ -942,20 +1247,28 @@ struct SiteCard: View {
         .popover(isPresented: $editingPassword, arrowEdge: .bottom) { passwordEditor }
     }
 
+    /// Changes when the server starts and on every visit, to play the short wave animation.
+    private var activityPulse: String { "\(site.isRunning)-\(site.requestCount)" }
+
     private func qrTile(_ url: String) -> some View {
         Button { showQR = true } label: {
             if let qr = QRCode.image(for: url) {
                 Image(nsImage: qr)
-                    .interpolation(.none)
                     .resizable()
                     .frame(width: 140, height: 140)
-                    .padding(8)
-                    .background(.white, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                    .shadow(color: .black.opacity(0.08), radius: 6, y: 2)
+                    .padding(6)
+                    .background {
+                        // White box with a soft shadow under it (the shadow is on the box only).
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .fill(Color.white)
+                            .shadow(color: .black.opacity(0.16), radius: 12, y: 5)
+                    }
             }
         }
-        .buttonStyle(.plain)
-        .help("Ampliar código QR")
+        .buttonStyle(PlainPressStyle())
+        .focusRing(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .help(tr("Ampliar código QR", ca: "Amplia el codi QR", en: "Enlarge QR code"))
+        .accessibilityLabel(tr("Ampliar código QR", ca: "Amplia el codi QR", en: "Enlarge QR code"))
         .popover(isPresented: $showQR, arrowEdge: .bottom) {
             QRPopover(url: url, visits: site.requestCount, password: site.password)
         }
@@ -967,20 +1280,21 @@ struct SiteCard: View {
             if site.isRunning {
                 HStack(spacing: 5) {
                     Circle().fill(Color.green).frame(width: 6, height: 6)
-                    Text(site.notice ?? "Activa · \(site.requestCount) \(site.requestCount == 1 ? "visita" : "visitas")")
+                    Text(site.notice ?? (site.requestCount == 1 ? tr("Activa · 1 visita", ca: "Activa · 1 visita", en: "Live · 1 visit") : tr("Activa · \(site.requestCount) visitas", ca: "Activa · \(site.requestCount) visites", en: "Live · \(site.requestCount) visits")))
                         .monospacedDigit()
                 }
                 .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Brand.secondaryText)
             } else {
                 Button { portDraft = site.portText; editingPort = true } label: {
-                    Text("Puerto \(site.portText)")
+                    Text(tr("Puerto \(site.portText)", ca: "Port \(site.portText)", en: "Port \(site.portText)"))
                         .monospacedDigit()
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(PlainPressStyle())
+                .focusRing(RoundedRectangle(cornerRadius: 4, style: .continuous))
                 .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(.secondary)
-                .help("Cambiar puerto")
+                .foregroundStyle(Brand.secondaryText)
+                .help(tr("Cambiar puerto", ca: "Canvia el port", en: "Change port"))
             }
 
             Text(site.name)
@@ -988,7 +1302,7 @@ struct SiteCard: View {
                 .lineLimit(1)
                 .truncationMode(.middle)
                 .foregroundStyle(.primary)
-                .help("\(site.folder.path)\nDoble clic para cambiar el nombre")
+                .help("\(site.folder.path)\n" + tr("Doble clic para cambiar el nombre", ca: "Fes doble clic per canviar el nom", en: "Double-click to rename"))
                 .onTapGesture(count: 2, perform: renameSite)
                 .popover(isPresented: $editingName, arrowEdge: .bottom) { nameEditor }
 
@@ -996,30 +1310,13 @@ struct SiteCard: View {
 
             HStack(spacing: 8) {
                 if site.isRunning {
-                    Button("Detener") { site.stop() }
+                    Button(tr("Detener", ca: "Atura", en: "Stop")) { site.stop() }
                         .buttonStyle(PillButtonStyle(kind: .neutral))
-                    if let url = site.shareURL, let link = URL(string: url) {
-                        // Opens the site in the default browser.
-                        Button { open(url) } label: {
-                            circleIcon("display")
-                        }
-                        .buttonStyle(.plain)
-                        .foregroundStyle(.primary)
-                        .help("Abrir en el navegador")
-                        .accessibilityLabel("Abrir en el navegador")
-
-                        // Native macOS share menu (AirDrop, Mensajes, Mail, Notas…) with the address.
-                        ShareLink(item: link) {
-                            circleIcon("square.and.arrow.up")
-                        }
-                        .buttonStyle(.plain)
-                        .foregroundStyle(.primary)
-                        .help("Compartir dirección")
-                        .accessibilityLabel("Compartir dirección")
-                    }
+                        .focusRing(Capsule())
                 } else {
-                    Button("Iniciar") { site.start() }
+                    Button(tr("Iniciar", ca: "Inicia", en: "Start")) { site.start() }
                         .buttonStyle(PillButtonStyle(kind: .prominent))
+                        .focusRing(Capsule())
                         .disabled(site.port == nil)
                 }
             }
@@ -1027,21 +1324,12 @@ struct SiteCard: View {
         }
     }
 
-    /// Round grey icon button face, same height as the pill buttons.
-    private func circleIcon(_ symbol: String) -> some View {
-        Image(systemName: symbol)
-            .font(.system(size: 13, weight: .semibold))
-            .frame(width: 34, height: 34)
-            .background(Brand.pillFill, in: Circle())
-            .contentShape(Circle())
-    }
-
     @ViewBuilder
     private func description() -> some View {
         if let error = site.errorMessage, !site.isRunning {
             Text(error)
                 .font(.system(size: 12))
-                .foregroundStyle(.red)
+                .foregroundStyle(Brand.errorText)
                 .lineLimit(3)
                 .fixedSize(horizontal: false, vertical: true)
         } else if site.isRunning {
@@ -1052,26 +1340,27 @@ struct SiteCard: View {
             } label: {
                 Group {
                     if copied {
-                        Label("URL en el portapapeles", systemImage: "checkmark")
+                        Label(tr("URL en el portapapeles", ca: "URL al porta-retalls", en: "URL copied to clipboard"), systemImage: "checkmark")
                     } else {
                         Text(shown).monospacedDigit()
                     }
                 }
                 .font(.system(size: 12))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Brand.secondaryText)
                 .contentShape(Rectangle())
                 .animation(.easeOut(duration: 0.15), value: copied)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(PlainPressStyle())
+            .focusRing(RoundedRectangle(cornerRadius: 4, style: .continuous))
             .fixedSize()
-            .help("Copiar dirección")
-            .accessibilityLabel("Copiar dirección \(shown)")
+            .help(tr("Copiar dirección", ca: "Copia l'adreça", en: "Copy address"))
+            .accessibilityLabel(tr("Copiar dirección \(shown)", ca: "Copia l'adreça \(shown)", en: "Copy address \(shown)"))
         } else {
             // With a custom name, include the folder itself so it's still clear what is served.
             let shownFolder = site.customName.isEmpty ? site.folder.deletingLastPathComponent() : site.folder
             Text((shownFolder.path as NSString).abbreviatingWithTildeInPath)
                 .font(.system(size: 12))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Brand.secondaryText)
                 .lineLimit(2)
                 .truncationMode(.head)
         }
@@ -1079,19 +1368,21 @@ struct SiteCard: View {
 
     private var portEditor: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("Puerto").font(.headline)
+            Text(tr("Puerto", ca: "Port", en: "Port")).font(.headline)
             HStack(spacing: 8) {
-                BrandField(placeholder: "8000", text: $portDraft, onSubmit: applyPort)
+                BrandField(label: tr("Puerto", ca: "Port", en: "Port"), placeholder: "8000", text: $portDraft, onSubmit: applyPort)
                     .frame(width: 80)
-                Button("Aceptar", action: applyPort)
+                Button(tr("Aceptar", ca: "D'acord", en: "OK"), action: applyPort)
                     .buttonStyle(PillButtonStyle(kind: .prominent, compact: true))
+                    .focusRing(Capsule())
                     .keyboardShortcut(.defaultAction)
             }
-            Text("Libres: " + suggestedPorts.prefix(4).map(String.init).joined(separator: ", "))
+            Text(tr("Libres: ", ca: "Lliures: ", en: "Free: ") + suggestedPorts.prefix(4).map(String.init).joined(separator: ", "))
                 .font(.caption)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Brand.secondaryText)
         }
         .padding(14)
+        .focusEffectDisabled()   // popovers: same pink focus ring as the window
     }
 
     private var suggestedPorts: [Int] {
@@ -1101,27 +1392,31 @@ struct SiteCard: View {
 
     private var passwordEditor: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("Contraseña").font(.headline)
-            Text("Quien abra la web tendrá que escribirla.\nNo uses una contraseña personal.")
+            Text(tr("Contraseña", ca: "Contrasenya", en: "Password")).font(.headline)
+            Text(tr("Quien abra la web tendrá que escribirla.\nNo uses una contraseña personal.", ca: "Qui obri el web l'haurà d'escriure.\nNo facis servir una contrasenya personal.", en: "Anyone opening the site will have to enter it.\nDon't use a personal password."))
                 .font(.caption)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Brand.secondaryText)
                 .fixedSize(horizontal: false, vertical: true)
             HStack(spacing: 8) {
-                BrandField(placeholder: "Sin contraseña", text: $passwordDraft, onSubmit: applyPassword)
+                BrandField(label: tr("Contraseña", ca: "Contrasenya", en: "Password"), placeholder: tr("Sin contraseña", ca: "Sense contrasenya", en: "No password"), text: $passwordDraft, onSubmit: applyPassword)
                     .frame(width: 150)
-                Button("Aceptar", action: applyPassword)
+                Button(tr("Aceptar", ca: "D'acord", en: "OK"), action: applyPassword)
                     .buttonStyle(PillButtonStyle(kind: .prominent, compact: true))
+                    .focusRing(Capsule())
                     .keyboardShortcut(.defaultAction)
             }
             HStack(spacing: 12) {
-                Button("Generar") { passwordDraft = Self.randomPassword() }
+                Button(tr("Generar", ca: "Genera", en: "Generate")) { passwordDraft = Self.randomPassword() }
+                    .focusRing(RoundedRectangle(cornerRadius: 4, style: .continuous))
                 if site.hasPassword {
-                    Button("Quitar contraseña") { passwordDraft = ""; applyPassword() }
+                    Button(tr("Quitar contraseña", ca: "Treu la contrasenya", en: "Remove password")) { passwordDraft = ""; applyPassword() }
+                        .focusRing(RoundedRectangle(cornerRadius: 4, style: .continuous))
                 }
             }
             .buttonStyle(LinkStyle())
         }
         .padding(14)
+        .focusEffectDisabled()   // popovers: same pink focus ring as the window
         .frame(width: 260, alignment: .leading)
     }
 
@@ -1132,20 +1427,23 @@ struct SiteCard: View {
 
     var nameEditor: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("Nombre").font(.headline)
+            Text(tr("Nombre", ca: "Nom", en: "Name")).font(.headline)
             HStack(spacing: 8) {
-                BrandField(placeholder: site.folder.lastPathComponent, text: $nameDraft, onSubmit: applyName)
+                BrandField(label: tr("Nombre", ca: "Nom", en: "Name"), placeholder: site.folder.lastPathComponent, text: $nameDraft, onSubmit: applyName)
                     .frame(width: 180)
-                Button("Aceptar", action: applyName)
+                Button(tr("Aceptar", ca: "D'acord", en: "OK"), action: applyName)
                     .buttonStyle(PillButtonStyle(kind: .prominent, compact: true))
+                    .focusRing(Capsule())
                     .keyboardShortcut(.defaultAction)
             }
             if !site.customName.isEmpty {
-                Button("Usar el nombre de la carpeta") { nameDraft = ""; applyName() }
+                Button(tr("Usar el nombre de la carpeta", ca: "Fes servir el nom de la carpeta", en: "Use folder name")) { nameDraft = ""; applyName() }
                     .buttonStyle(LinkStyle())
+                    .focusRing(RoundedRectangle(cornerRadius: 4, style: .continuous))
             }
         }
         .padding(14)
+        .focusEffectDisabled()   // popovers: same pink focus ring as the window
     }
 
     private func applyName() {
@@ -1174,7 +1472,7 @@ struct SiteCard: View {
         let panel = NSOpenPanel()
         panel.canChooseDirectories = true
         panel.canChooseFiles = false
-        panel.prompt = "Elegir"
+        panel.prompt = tr("Elegir", ca: "Tria", en: "Choose")
         panel.directoryURL = site.folder
         if panel.runModal() == .OK, let url = panel.url { site.folder = url }
     }
@@ -1183,6 +1481,7 @@ struct SiteCard: View {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(text, forType: .string)
         copied = true
+        announce(tr("URL en el portapapeles", ca: "URL al porta-retalls", en: "URL copied to clipboard"))
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { copied = false }
     }
 
@@ -1203,18 +1502,16 @@ struct AddCard: View {
                     .font(.system(size: 15, weight: .regular))
                 Spacer(minLength: 0)
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("Nueva")
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(.secondary)
-                    Text("Añadir carpeta")
+                    Text(tr("Añadir carpeta", ca: "Afegeix una carpeta", en: "Add folder"))
                         .font(.system(size: 15, weight: .semibold))
                         .foregroundStyle(.primary)
-                    Text("Arrástrala a la ventana o elígela desde Finder.")
+                    Text(tr("Arrástrala a la ventana o elígela desde Finder.", ca: "Arrossega-la a la finestra o tria-la des del Finder.", en: "Drop it on the window or choose it in Finder."))
                         .font(.system(size: 12))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Brand.secondaryText)
                         .fixedSize(horizontal: false, vertical: true)
-                    Button("Elegir", action: onChoose)
+                    Button(tr("Elegir", ca: "Tria", en: "Choose"), action: onChoose)
                         .buttonStyle(PillButtonStyle(kind: .neutral))
+                        .focusRing(Capsule())
                         .padding(.top, 8)
                 }
             }
@@ -1234,25 +1531,24 @@ struct QRPopover: View {
         VStack(spacing: 12) {
             if let qr = QRCode.image(for: url) {
                 Image(nsImage: qr)
-                    .interpolation(.none)
                     .resizable()
                     .frame(width: 176, height: 176)
                     .padding(10)
-                    .background(.white, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-                    .accessibilityLabel("Código QR de \(url)")
+                    .background(Color.white, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    .accessibilityLabel(tr("Código QR de \(url)", ca: "Codi QR de \(url)", en: "QR code for \(url)"))
             }
             VStack(spacing: 3) {
                 Text(url.replacingOccurrences(of: "http://", with: ""))
                     .font(.system(size: 15, weight: .bold))
                     .textSelection(.enabled)
-                Text("Escanéalo con el móvil · \(visits) \(visits == 1 ? "visita" : "visitas")")
+                Text(visits == 1 ? tr("Escanéalo con el móvil · 1 visita", ca: "Escaneja'l amb el mòbil · 1 visita", en: "Scan it with your phone · 1 visit") : tr("Escanéalo con el móvil · \(visits) visitas", ca: "Escaneja'l amb el mòbil · \(visits) visites", en: "Scan it with your phone · \(visits) visits"))
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Brand.secondaryText)
                     .monospacedDigit()
                 if !password.isEmpty {
-                    Label("Contraseña: \(password)", systemImage: "lock.fill")
+                    Label(tr("Contraseña: \(password)", ca: "Contrasenya: \(password)", en: "Password: \(password)"), systemImage: "lock.fill")
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Brand.secondaryText)
                         .textSelection(.enabled)
                         .padding(.top, 4)
                 }

@@ -18,6 +18,12 @@ swiftc -O -parse-as-library -swift-version 5 \
 
 cp Info.plist "$APP/Contents/Info.plist"
 
+# Languages for the system texts (menus, local network prompt). The app's own texts are in LocalDemoApp.swift.
+mkdir -p "$APP/Contents/Resources/"{en,es,ca}.lproj
+echo '"NSLocalNetworkUsageDescription" = "Local Demo shares your sites with other devices on your network.";' > "$APP/Contents/Resources/en.lproj/InfoPlist.strings"
+echo '"NSLocalNetworkUsageDescription" = "Local Demo comparte tus webs con otros dispositivos de tu red.";' > "$APP/Contents/Resources/es.lproj/InfoPlist.strings"
+echo '"NSLocalNetworkUsageDescription" = "Local Demo comparteix els teus webs amb altres dispositius de la teva xarxa.";' > "$APP/Contents/Resources/ca.lproj/InfoPlist.strings"
+
 echo "→ Generando icono…"
 swift make_icon.swift logo.png "$BUILD/icon_1024.png"
 for s in 16 32 128 256 512; do

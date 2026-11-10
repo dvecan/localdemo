@@ -3,7 +3,15 @@
 <plist version="1.0">
 <dict>
 	<key>CFBundleDevelopmentRegion</key>
-	<string>es</string>
+	<string>en</string>
+	<key>CFBundleLocalizations</key>
+	<array>
+		<string>en</string>
+		<string>es</string>
+		<string>ca</string>
+	</array>
+	<key>CFBundleAllowMixedLocalizations</key>
+	<true/>
 	<key>CFBundleDisplayName</key>
 	<string>Local Demo</string>
 	<key>CFBundleExecutable</key>
@@ -27,6 +35,6 @@
 	<key>NSHighResolutionCapable</key>
 	<true/>
 	<key>NSLocalNetworkUsageDescription</key>
-	<string>Local Demo comparte tu web con otros dispositivos de tu red.</string>
+	<string>Local Demo shares your sites with other devices on your network.</string>
 </dict>
 </plist>
