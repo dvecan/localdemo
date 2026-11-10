@@ -371,7 +371,7 @@ struct ContentView: View {
     private var header: some View {
         HStack(alignment: .bottom) {
             VStack(alignment: .leading, spacing: 6) {
-                Text("Tus proyectos, en cualquier dispositivo local.")
+                Text("Tus proyectos, en cualquier dispositivo local")
                     .font(.system(size: 26, weight: .semibold))
                 Text("Arrastra carpetas a esta ventana y visualízalas en cualquier dispositivo conectado a este wifi.")
                     .font(.system(size: 13))
