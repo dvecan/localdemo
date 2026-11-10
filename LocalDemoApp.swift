@@ -484,19 +484,17 @@ struct ContentView: View {
 
 // MARK: - Card shell
 
-/// Tall rounded card with a flat warm-grey background that never changes colour;
-/// on hover it lifts 2 pt with a faint shadow.
+/// Tall rounded card with a flat warm-grey background; on hover it lifts 2 pt with a faint shadow.
 struct Card<Content: View>: View {
     @ViewBuilder var content: () -> Content
     @State private var hovering = false
 
     var body: some View {
         let shape = RoundedRectangle(cornerRadius: 20, style: .continuous)
-        let fill = Brand.card   // backgrounds never change colour; only the CTA carries colour
 
         content()
             .frame(width: ContentView.cardSize.width, height: ContentView.cardSize.height)
-            .background(fill, in: shape)
+            .background(Brand.card, in: shape)
             .clipShape(shape)
             .offset(y: hovering ? -2 : 0)
             .shadow(color: .black.opacity(hovering ? 0.05 : 0), radius: 12, y: 6)
@@ -621,19 +619,24 @@ struct SiteCard: View {
                 if site.isRunning {
                     Button("Detener") { site.stop() }
                         .buttonStyle(PillButtonStyle(kind: .neutral))
-                    if let url = site.shareURL {
+                    if let url = site.shareURL, let link = URL(string: url) {
                         // Opens the site in the default browser.
                         Button { open(url) } label: {
-                            Image(systemName: "arrow.up.right")
-                                .font(.system(size: 12, weight: .semibold))
-                                .frame(width: 34, height: 34)
-                                .background(Brand.pillFill, in: Circle())
-                                .contentShape(Circle())
+                            circleIcon("display")
                         }
                         .buttonStyle(.plain)
                         .foregroundStyle(.primary)
                         .help("Abrir en el navegador")
                         .accessibilityLabel("Abrir en el navegador")
+
+                        // Native macOS share menu (AirDrop, Mensajes, Mail, Notas…) with the address.
+                        ShareLink(item: link) {
+                            circleIcon("square.and.arrow.up")
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(.primary)
+                        .help("Compartir dirección")
+                        .accessibilityLabel("Compartir dirección")
                     }
                 } else {
                     Button("Iniciar") { site.start() }
@@ -645,6 +648,15 @@ struct SiteCard: View {
         }
     }
 
+    /// Round grey icon button face, same height as the pill buttons.
+    private func circleIcon(_ symbol: String) -> some View {
+        Image(systemName: symbol)
+            .font(.system(size: 13, weight: .semibold))
+            .frame(width: 34, height: 34)
+            .background(Brand.pillFill, in: Circle())
+            .contentShape(Circle())
+    }
+
     @ViewBuilder
     private func description() -> some View {
         if let error = site.errorMessage, !site.isRunning {
@@ -654,26 +666,27 @@ struct SiteCard: View {
                 .lineLimit(3)
                 .fixedSize(horizontal: false, vertical: true)
         } else if site.isRunning {
-            Menu {
-                if let url = site.shareURL {
-                    Button(copied ? "Copiada" : "Copiar dirección") { copy(url) }
-                    Button("Abrir en el navegador") { open(url) }
-                }
+            // Click the address to copy it; it briefly confirms in place.
+            let shown = (site.networkURL ?? site.shareURL ?? "").replacingOccurrences(of: "http://", with: "")
+            Button {
+                if let url = site.shareURL { copy(url) }
             } label: {
-                HStack(spacing: 4) {
-                    Text((site.networkURL ?? site.shareURL ?? "").replacingOccurrences(of: "http://", with: ""))
-                        .monospacedDigit()
-                    Image(systemName: "chevron.down").font(.system(size: 8, weight: .bold))
+                Group {
+                    if copied {
+                        Label("URL en el portapapeles", systemImage: "checkmark")
+                    } else {
+                        Text(shown).monospacedDigit()
+                    }
                 }
                 .font(.system(size: 12))
                 .foregroundStyle(.secondary)
                 .contentShape(Rectangle())
+                .animation(.easeOut(duration: 0.15), value: copied)
             }
-            .menuStyle(.button)
             .buttonStyle(.plain)
-            .menuIndicator(.hidden)
             .fixedSize()
-            .help("Copiar o abrir la dirección")
+            .help("Copiar dirección")
+            .accessibilityLabel("Copiar dirección \(shown)")
         } else {
             Text((site.folder.deletingLastPathComponent().path as NSString).abbreviatingWithTildeInPath)
                 .font(.system(size: 12))
