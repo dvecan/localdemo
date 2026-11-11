@@ -1171,6 +1171,7 @@ struct SiteCard: View {
     @State private var passwordDraft = ""
     @State private var editingName = false
     @State private var hoveringMenu = false
+    @State private var hoveringTrash = false
     @State private var nameDraft = ""
     @State private var copied = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -1235,6 +1236,22 @@ struct SiteCard: View {
                 .accessibilityLabel(tr("Compartir dirección", ca: "Comparteix l'adreça", en: "Share address"))
             }
             if !site.isRunning {
+                // Removes the folder from the app (it stays on disk). Same look as the "…" button next to it.
+                Button { SiteStore.shared.remove(site) } label: {
+                    Image(systemName: "trash")
+                        .font(.system(size: 13, weight: .semibold))
+                        .frame(width: 28, height: 28)
+                        .background(hoveringTrash ? Brand.pillFill : .clear, in: Circle())
+                        .foregroundStyle(hoveringTrash ? Color.primary : Brand.secondaryText)
+                        .contentShape(Circle())
+                        .onHover { hoveringTrash = $0 }
+                        .animation(.easeOut(duration: 0.12), value: hoveringTrash)
+                }
+                .buttonStyle(PlainPressStyle())
+                .focusRing(Circle())
+                .help(tr("Quitar de la lista", ca: "Treu de la llista", en: "Remove from List"))
+                .accessibilityLabel(tr("Quitar \(site.name) de la lista", ca: "Treu \(site.name) de la llista", en: "Remove \(site.name) from list"))
+
                 Menu {
                     Button(tr("Cambiar nombre…", ca: "Canvia el nom…", en: "Rename…"), action: renameSite)
                     Button(tr("Cambiar puerto…", ca: "Canvia el port…", en: "Change Port…")) { portDraft = site.portText; editingPort = true }
@@ -1243,8 +1260,6 @@ struct SiteCard: View {
                     }
                     Button(tr("Mostrar en Finder", ca: "Mostra al Finder", en: "Show in Finder")) { NSWorkspace.shared.activateFileViewerSelecting([site.folder]) }
                     Button(tr("Cambiar carpeta…", ca: "Canvia la carpeta…", en: "Change Folder…"), action: changeFolder)
-                    Divider()
-                    Button(tr("Quitar de la lista", ca: "Treu de la llista", en: "Remove from List")) { SiteStore.shared.remove(site) }
                 } label: {
                     Image(systemName: "ellipsis")
                         .font(.system(size: 13, weight: .semibold))
