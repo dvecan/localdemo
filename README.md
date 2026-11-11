@@ -70,4 +70,4 @@ Local Demo is meant for showing work in progress on a trusted network, for a sho
 
 ## License
 
-[MIT](LICENSE.md). You can use, copy, modify and share this project for any purpose, as long as you keep the copyright and license notice.
+[MIT](LICENSE). You can use, copy, modify and share this project for any purpose, as long as you keep the copyright and license notice.
