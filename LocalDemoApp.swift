@@ -964,6 +964,8 @@ struct ContentView: View {
     @State private var isDropTarget = false
     @State private var confirmClear = false
     @State private var scrollTarget: UUID?
+    @State private var showHelp = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     static let cardSize = CGSize(width: 220, height: 350)
     static let windowWidth: CGFloat = 760
@@ -1000,6 +1002,22 @@ struct ContentView: View {
             }
         }
         .animation(.easeOut(duration: 0.15), value: isDropTarget)
+        .accessibilityHidden(showHelp)   // VoiceOver stays inside the help panel while it's open
+        .overlay {
+            if showHelp {
+                ZStack {
+                    // Dimmed window behind the panel; clicking it closes the panel.
+                    Color.black.opacity(0.4)
+                        .ignoresSafeArea()
+                        .onTapGesture { showHelp = false }
+                        .accessibilityHidden(true)
+                    HelpPanel { showHelp = false }
+                        .transition(reduceMotion ? .opacity : .opacity.combined(with: .scale(scale: 0.96)))
+                }
+                .transition(.opacity)
+            }
+        }
+        .animation(.easeOut(duration: 0.18), value: showHelp)
         .dropDestination(for: URL.self) { urls, _ in
             let folders = urls.filter(\.hasDirectoryPath)
             guard !folders.isEmpty else { return false }
@@ -1058,7 +1076,7 @@ struct ContentView: View {
     private var carousel: some View {
         // "Add folder" stays pinned on the left; only the folder cards scroll.
         HStack(spacing: 0) {
-            AddCard(onChoose: chooseFolders)
+            AddCard(onChoose: chooseFolders, onHelp: { showHelp = true })
                 .padding(.leading, 32)
                 .padding(.trailing, 14)
                 .padding(.vertical, 24)   // room for the hover lift and shadow
@@ -1533,12 +1551,34 @@ struct SiteCard: View {
 
 struct AddCard: View {
     var onChoose: () -> Void
+    var onHelp: () -> Void
+    @State private var hoveringHelp = false
 
     var body: some View {
         Card {
             VStack(alignment: .leading, spacing: 0) {
-                Image(systemName: "plus")
-                    .font(.system(size: 15, weight: .regular))
+                HStack {
+                    Image(systemName: "plus")
+                        .font(.system(size: 15, weight: .regular))
+                        .accessibilityHidden(true)
+                    Spacer()
+                    // Opens the panel that explains which folder to choose. Same look as the card's "…" button.
+                    Button(action: onHelp) {
+                        Image(systemName: "questionmark.circle")
+                            .font(.system(size: 15, weight: .regular))
+                            .frame(width: 28, height: 28)
+                            .background(hoveringHelp ? Brand.pillFill : .clear, in: Circle())
+                            .foregroundStyle(hoveringHelp ? Color.primary : Brand.secondaryText)
+                            .contentShape(Circle())
+                            .onHover { hoveringHelp = $0 }
+                            .animation(.easeOut(duration: 0.12), value: hoveringHelp)
+                    }
+                    .buttonStyle(PlainPressStyle())
+                    .focusRing(Circle())
+                    .help(tr("¿Qué carpeta elijo?", ca: "Quina carpeta trio?", en: "Which folder should I choose?"))
+                    .accessibilityLabel(tr("Ayuda: ¿qué carpeta elijo?", ca: "Ajuda: quina carpeta trio?", en: "Help: which folder should I choose?"))
+                }
+                .frame(height: 30)
                 Spacer(minLength: 0)
                 VStack(alignment: .leading, spacing: 4) {
                     Text(tr("Añadir carpeta", ca: "Afegeix una carpeta", en: "Add folder"))
@@ -1558,6 +1598,85 @@ struct AddCard: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
         .onTapGesture(perform: onChoose)
+    }
+}
+
+// MARK: - Help panel: which folder to choose, for people who don't build websites
+
+struct HelpPanel: View {
+    var onClose: () -> Void
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(tr("¿Qué carpeta elijo?", ca: "Quina carpeta trio?", en: "Which folder should I choose?"))
+                    .font(.system(size: 20, weight: .semibold))
+                    .accessibilityAddTraits(.isHeader)
+                Spacer()
+                Button(action: onClose) { Image(systemName: "xmark") }
+                    .buttonStyle(CircleButtonStyle(size: 28))
+                    .focusRing(Circle())
+                    .keyboardShortcut(.cancelAction)   // Esc closes the panel
+                    .help(tr("Cerrar", ca: "Tanca", en: "Close"))
+                    .accessibilityLabel(tr("Cerrar", ca: "Tanca", en: "Close"))
+            }
+
+            item("doc.richtext",
+                 title: tr("La carpeta de tu web", ca: "La carpeta del teu web", en: "Your website's folder"),
+                 text: tr("Elige la carpeta que tiene dentro un archivo llamado index.html. Es la página que se abre en el móvil al escanear el código QR.",
+                          ca: "Tria la carpeta que té a dins un fitxer anomenat index.html. És la pàgina que s'obre al mòbil quan escaneges el codi QR.",
+                          en: "Choose the folder that has a file called index.html inside. It's the page that opens on the phone when you scan the QR code."))
+            item("hand.tap",
+                 title: tr("Cómo comprobarlo", ca: "Com comprovar-ho", en: "How to check"),
+                 text: tr("Haz doble clic en index.html. Si la web se ve bien en tu navegador, también se verá bien en el móvil.",
+                          ca: "Fes doble clic a index.html. Si el web es veu bé al navegador, també es veurà bé al mòbil.",
+                          en: "Double-click index.html. If the site looks right in your browser, it will look right on the phone too."))
+            item("person.2",
+                 title: tr("Si te la ha preparado otra persona", ca: "Si te l'ha preparat una altra persona", en: "If someone else made it for you"),
+                 text: tr("Pídele «la versión final, la que se abre con doble clic en el index.html». Suele estar en una carpeta llamada dist o build.",
+                          ca: "Demana-li «la versió final, la que s'obre amb doble clic a l'index.html». Sol ser en una carpeta anomenada dist o build.",
+                          en: "Ask them for “the final version, the one that opens when you double-click index.html”. It's usually in a folder called dist or build."))
+            item("exclamationmark.circle",
+                 title: tr("Lo que no funcionará", ca: "El que no funcionarà", en: "What won't work"),
+                 text: tr("Formularios que envían datos, inicios de sesión, compras o cualquier cosa que guarde información. Local Demo solo enseña la web.",
+                          ca: "Formularis que envien dades, inicis de sessió, compres o qualsevol cosa que desi informació. Local Demo només ensenya el web.",
+                          en: "Forms that send data, sign-ins, purchases or anything that saves information. Local Demo only shows the site."))
+
+            HStack {
+                Spacer()
+                Button(tr("Entendido", ca: "Entesos", en: "Got it"), action: onClose)
+                    .buttonStyle(PillButtonStyle())
+                    .focusRing(Capsule())
+                    .keyboardShortcut(.defaultAction)   // Return closes it too
+                    .focused($focused)
+            }
+        }
+        .padding(24)
+        .frame(width: 440)
+        .background(Brand.canvas, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .shadow(color: .black.opacity(0.2), radius: 24, y: 10)
+        .accessibilityElement(children: .contain)
+        .accessibilityAddTraits(.isModal)
+        .onAppear { DispatchQueue.main.async { focused = true } }
+    }
+
+    private func item(_ symbol: String, title: String, text: String) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: symbol)
+                .font(.system(size: 15))
+                .foregroundStyle(Brand.accentText)
+                .frame(width: 22)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title).font(.system(size: 13, weight: .semibold))
+                Text(text)
+                    .font(.system(size: 13))
+                    .foregroundStyle(Brand.secondaryText)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .accessibilityElement(children: .combine)
     }
 }
 
