@@ -70,4 +70,4 @@ Local Demo is meant for showing work in progress on a trusted network, for a sho
 
 ## License
 
-[PolyForm Noncommercial 1.0.0](LICENSE.md). You can use, copy and modify this project for any noncommercial purpose. Commercial use isn’t allowed.
+[MIT](LICENSE.md). You can use, copy, modify and share this project for any purpose, as long as you keep the copyright and license notice.
