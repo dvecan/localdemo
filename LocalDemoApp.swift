@@ -903,8 +903,32 @@ struct LinkStyle: ButtonStyle {
                 .foregroundStyle(hovering ? Brand.accentTextHover : Brand.accentText)
                 .opacity(configuration.isPressed ? 0.6 : 1)
                 .contentShape(Rectangle())
+                .linkCursor()
         }
     }
+}
+
+/// Pointing-hand cursor over text links (macOS shows it on links only, never on buttons).
+private struct LinkCursor: ViewModifier {
+    @State private var pushed = false
+
+    func body(content: Content) -> some View {
+        if #available(macOS 15.0, *) {
+            content.pointerStyle(.link)
+        } else {
+            content
+                .onHover { hovering in
+                    if hovering, !pushed { NSCursor.pointingHand.push(); pushed = true }
+                    else if !hovering, pushed { NSCursor.pop(); pushed = false }
+                }
+                // The link can vanish under the pointer (e.g. a popover closing), so restore the cursor.
+                .onDisappear { if pushed { NSCursor.pop(); pushed = false } }
+        }
+    }
+}
+
+extension View {
+    func linkCursor() -> some View { modifier(LinkCursor()) }
 }
 
 /// Text field with a neutral border that turns the CTA colour while typing (instead of the blue focus ring).
