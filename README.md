@@ -2,7 +2,7 @@
 
 A macOS app that serves one or more folders of static websites and shares them with any device on your network (phone, tablet, another computer). Drop the folders in, click **Start** and scan the QR code with your phone, no Terminal needed.
 
-![Local Demo in action: drop a folder, click Start and scan the QR code to open the site on your phone](docs/demo.gif)
+![Local Demo in action: drop a folder, click Start and scan the QR code to open the site on your phone, run several sites at once and protect one with a password](docs/demo.gif)
 
 ## Features
 
