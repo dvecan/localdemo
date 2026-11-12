@@ -2,7 +2,7 @@
 
 A macOS app that serves one or more folders of static websites and shares them with any device on your network (phone, tablet, another computer). Drop the folders in, click **Start** and scan the QR code with your phone, no Terminal needed.
 
-![Local Demo window with a running folder, its QR code and other folders ready to start](docs/captura.png)
+![Local Demo in action: drop a folder, click Start and scan the QR code to open the site on your phone](docs/demo.gif)
 
 ## Features
 
@@ -55,7 +55,7 @@ Each Mac has its own ports: if several people use Local Demo on their Macs, all 
 | `make_icon.swift` | Turns the logo into the macOS icon (rounded shape and margin) |
 | `Info.plist` | App name, identifier, version and languages |
 | `build.sh` | Builds the app, generates the icon, signs it locally and installs it in `~/Applications` |
-| `docs/` | Screenshots for this README |
+| `docs/` | Demo animation and screenshots for this README |
 
 To test without using the interface, set `LOCALDEMO_AUTOSTART=1` and the app starts serving every saved folder when it opens. To force a language, set `LOCALDEMO_LANG` to `en`, `es` or `ca`.
 
