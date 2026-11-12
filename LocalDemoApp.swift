@@ -1259,7 +1259,7 @@ struct SiteCard: View {
                 // endless loop) keep it within WCAG 2.2.2, and it's off when Reduce Motion is on.
                 .symbolEffect(.variableColor.iterative.reversing, options: .repeat(2), value: activityPulse)
                 .symbolEffectsRemoved(reduceMotion)
-                .accessibilityHidden(true)   // the state is already said in text ("Activa · 3 visitas")
+                .accessibilityHidden(true)   // the state is already said in text ("Activa")
             if site.hasPassword {
                 Image(systemName: "lock.fill")
                     .font(.system(size: 11, weight: .semibold))
@@ -1361,7 +1361,7 @@ struct SiteCard: View {
         .help(tr("Ampliar código QR", ca: "Amplia el codi QR", en: "Enlarge QR code"))
         .accessibilityLabel(tr("Ampliar código QR", ca: "Amplia el codi QR", en: "Enlarge QR code"))
         .popover(isPresented: $showQR, arrowEdge: .bottom) {
-            QRPopover(url: url, visits: site.requestCount, password: site.password)
+            QRPopover(url: url, password: site.password)
         }
     }
 
@@ -1371,8 +1371,7 @@ struct SiteCard: View {
             if site.isRunning {
                 HStack(spacing: 5) {
                     Circle().fill(Color.green).frame(width: 6, height: 6)
-                    Text(site.notice ?? (site.requestCount == 1 ? tr("Activa · 1 visita", ca: "Activa · 1 visita", en: "Live · 1 visit") : tr("Activa · \(site.requestCount) visitas", ca: "Activa · \(site.requestCount) visites", en: "Live · \(site.requestCount) visits")))
-                        .monospacedDigit()
+                    Text(site.notice ?? tr("Activa", ca: "Activa", en: "Live"))
                 }
                 .font(.system(size: 11, weight: .medium))
                 .foregroundStyle(Brand.secondaryText)
@@ -1876,7 +1875,6 @@ struct HelpPanel: View {
 
 struct QRPopover: View {
     let url: String
-    let visits: Int
     var password = ""
 
     var body: some View {
@@ -1893,10 +1891,9 @@ struct QRPopover: View {
                 Text(url.replacingOccurrences(of: "http://", with: ""))
                     .font(.system(size: 15, weight: .bold))
                     .textSelection(.enabled)
-                Text(visits == 1 ? tr("Escanéalo con el móvil · 1 visita", ca: "Escaneja'l amb el mòbil · 1 visita", en: "Scan it with your phone · 1 visit") : tr("Escanéalo con el móvil · \(visits) visitas", ca: "Escaneja'l amb el mòbil · \(visits) visites", en: "Scan it with your phone · \(visits) visits"))
+                Text(tr("Escanéalo con el móvil", ca: "Escaneja'l amb el mòbil", en: "Scan it with your phone"))
                     .font(.caption)
                     .foregroundStyle(Brand.secondaryText)
-                    .monospacedDigit()
                 if !password.isEmpty {
                     Label(tr("Contraseña: \(password)", ca: "Contrasenya: \(password)", en: "Password: \(password)"), systemImage: "lock.fill")
                         .font(.caption)
