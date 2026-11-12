@@ -15,6 +15,7 @@ A macOS app that serves one or more folders of static websites and shares them w
 - Protect each folder with a password (“…” > “Set Password…”). Visitors see a page where they enter it.
 - Never serves hidden files (`.git`, `.env`, `.DS_Store`…) or files outside the folder through symbolic links.
 - Remembers the folders and their ports, and stops every server when you close the window.
+- Shows a short tour of these features the first time it opens. Skip it or go through it, and see it again any time from **Help > Local Demo Tour**.
 - Supports light and dark mode.
 - Available in English, Spanish and Catalan. The app follows your Mac’s language: Catalan if it’s Catalan, Spanish if it’s Spanish or another language of Spain (Galician, Basque…), English otherwise. The password page uses the same language as the app.
 

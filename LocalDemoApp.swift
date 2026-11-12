@@ -9,16 +9,45 @@ import CoreImage.CIFilterBuiltins
 struct LocalDemoApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     @StateObject private var store = SiteStore.shared
+    @StateObject private var panels = Panels.shared
 
     var body: some Scene {
         Window("Local Demo", id: "main") {
             ContentView()
                 .environmentObject(store)
+                .environmentObject(panels)
                 .tint(Brand.accent)
                 .focusEffectDisabled()   // our pink focus ring replaces the system's blue one
         }
         .windowResizability(.contentSize)
         .windowStyle(.hiddenTitleBar)
+        .commands {
+            // Help menu: the tour can be seen again at any time, after skipping or finishing it.
+            CommandGroup(replacing: .help) {
+                Button(tr("Recorrido por Local Demo", ca: "Recorregut per Local Demo", en: "Local Demo Tour")) { panels.show(.tour) }
+                Button(tr("¿Qué carpeta elijo?", ca: "Quina carpeta trio?", en: "Which Folder Should I Choose?")) { panels.show(.folderHelp) }
+            }
+        }
+    }
+}
+
+/// The panel shown over the main window, if any. Shared so the Help menu can open them.
+@MainActor
+final class Panels: ObservableObject {
+    enum Kind { case tour, folderHelp }
+
+    static let shared = Panels()
+    private static let tourSeenKey = "tourSeen"
+
+    /// The tour opens by itself the first time the app launches.
+    @Published var current: Kind? = UserDefaults.standard.bool(forKey: tourSeenKey) ? nil : .tour
+
+    func show(_ kind: Kind) { current = kind }
+
+    func close() {
+        // Skipping the tour counts as seeing it: it won't open by itself again, only from the Help menu.
+        if current == .tour { UserDefaults.standard.set(true, forKey: Self.tourSeenKey) }
+        current = nil
     }
 }
 
@@ -964,7 +993,7 @@ struct ContentView: View {
     @State private var isDropTarget = false
     @State private var confirmClear = false
     @State private var scrollTarget: UUID?
-    @State private var showHelp = false
+    @EnvironmentObject var panels: Panels
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     static let cardSize = CGSize(width: 220, height: 350)
@@ -1002,22 +1031,27 @@ struct ContentView: View {
             }
         }
         .animation(.easeOut(duration: 0.15), value: isDropTarget)
-        .accessibilityHidden(showHelp)   // VoiceOver stays inside the help panel while it's open
+        .accessibilityHidden(panels.current != nil)   // VoiceOver stays inside the panel while it's open
         .overlay {
-            if showHelp {
+            if let kind = panels.current {
                 ZStack {
                     // Dimmed window behind the panel; clicking it closes the panel.
                     Color.black.opacity(0.4)
                         .ignoresSafeArea()
-                        .onTapGesture { showHelp = false }
+                        .onTapGesture { panels.close() }
                         .accessibilityHidden(true)
-                    HelpPanel { showHelp = false }
-                        .transition(reduceMotion ? .opacity : .opacity.combined(with: .scale(scale: 0.96)))
+                    Group {
+                        switch kind {
+                        case .tour: TourPanel { panels.close() }
+                        case .folderHelp: HelpPanel { panels.close() }
+                        }
+                    }
+                    .transition(reduceMotion ? .opacity : .opacity.combined(with: .scale(scale: 0.96)))
                 }
                 .transition(.opacity)
             }
         }
-        .animation(.easeOut(duration: 0.18), value: showHelp)
+        .animation(.easeOut(duration: 0.18), value: panels.current)
         .dropDestination(for: URL.self) { urls, _ in
             let folders = urls.filter(\.hasDirectoryPath)
             guard !folders.isEmpty else { return false }
@@ -1076,7 +1110,7 @@ struct ContentView: View {
     private var carousel: some View {
         // "Add folder" stays pinned on the left; only the folder cards scroll.
         HStack(spacing: 0) {
-            AddCard(onChoose: chooseFolders, onHelp: { showHelp = true })
+            AddCard(onChoose: chooseFolders, onHelp: { panels.show(.folderHelp) })
                 .padding(.leading, 32)
                 .padding(.trailing, 14)
                 .padding(.vertical, 24)   // room for the hover lift and shadow
@@ -1598,6 +1632,166 @@ struct AddCard: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
         .onTapGesture(perform: onChoose)
+    }
+}
+
+// MARK: - Tour: the main features, shown on first launch and from Help > Local Demo Tour
+
+struct TourPanel: View {
+    var onClose: () -> Void
+    @State private var index = 0
+    @FocusState private var focused: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    private struct Step {
+        /// SF Symbol, or nil for the app icon.
+        let symbol: String?
+        let title: String
+        let text: String
+    }
+
+    private let steps: [Step] = [
+        Step(symbol: nil,
+             title: tr("Te damos la bienvenida a Local Demo", ca: "Et donem la benvinguda a Local Demo", en: "Welcome to Local Demo"),
+             text: tr("Enseña tus webs en el móvil, la tablet u otro ordenador conectado a tu wifi, sin usar el Terminal.",
+                      ca: "Ensenya els teus webs al mòbil, la tauleta o un altre ordinador connectat a la teva wifi, sense fer servir el Terminal.",
+                      en: "Show your sites on a phone, tablet or another computer on your Wi‑Fi, no Terminal needed.")),
+        Step(symbol: "folder.badge.plus",
+             title: tr("Añade tus carpetas", ca: "Afegeix les teves carpetes", en: "Add your folders"),
+             text: tr("Arrastra a la ventana una o varias carpetas con tu web, o elígelas desde la tarjeta «Añadir carpeta». Cada una tiene su propio puerto.",
+                      ca: "Arrossega a la finestra una o més carpetes amb el teu web, o tria-les des de la targeta «Afegeix una carpeta». Cada una té el seu propi port.",
+                      en: "Drop one or more folders with your site on the window, or choose them from the “Add folder” card. Each one gets its own port.")),
+        Step(symbol: "qrcode",
+             title: tr("Inicia y escanea", ca: "Inicia i escaneja", en: "Start and scan"),
+             text: tr("Pulsa Iniciar y escanea el código QR con el móvil. También puedes copiar la dirección, abrirla en el navegador o compartirla.",
+                      ca: "Prem Inicia i escaneja el codi QR amb el mòbil. També pots copiar l'adreça, obrir-la al navegador o compartir-la.",
+                      en: "Click Start and scan the QR code with your phone. You can also copy the address, open it in the browser or share it.")),
+        Step(symbol: "lock",
+             title: tr("Ponle nombre y contraseña", ca: "Posa-hi nom i contrasenya", en: "Name it and lock it"),
+             text: tr("En el menú «…» de cada carpeta puedes cambiarle el nombre o el puerto, y protegerla con una contraseña que tus visitas tendrán que escribir.",
+                      ca: "Al menú «…» de cada carpeta pots canviar-ne el nom o el port, i protegir-la amb una contrasenya que les teves visites hauran d'escriure.",
+                      en: "From each folder’s “…” menu you can rename it, change its port and protect it with a password your visitors have to enter.")),
+        Step(symbol: "wifi",
+             title: tr("Antes de empezar", ca: "Abans de començar", en: "Before you start"),
+             text: tr("Los dispositivos tienen que estar en la misma wifi. Detén los servidores cuando acabes: mientras están activos, la carpeta está abierta en la red.",
+                      ca: "Els dispositius han d'estar a la mateixa wifi. Atura els servidors quan acabis: mentre estan actius, la carpeta és oberta a la xarxa.",
+                      en: "Devices must be on the same Wi‑Fi. Stop the servers when you’re done: while they’re running, the folder is open on the network.")),
+    ]
+
+    private var isLast: Bool { index == steps.count - 1 }
+    private var stepLabel: String {
+        tr("Paso \(index + 1) de \(steps.count)", ca: "Pas \(index + 1) de \(steps.count)", en: "Step \(index + 1) of \(steps.count)")
+    }
+
+    var body: some View {
+        let step = steps[index]
+        VStack(spacing: 0) {
+            HStack {
+                Spacer()
+                Button(tr("Saltar", ca: "Omet", en: "Skip"), action: onClose)
+                    .buttonStyle(QuietButtonStyle())
+                    .font(.system(size: 13))
+                    .focusRing(RoundedRectangle(cornerRadius: 4, style: .continuous))
+                    .keyboardShortcut(.cancelAction)   // Esc skips the tour
+                    .opacity(isLast ? 0 : 1)
+                    .disabled(isLast)
+                    .accessibilityHidden(isLast)
+            }
+
+            VStack(spacing: 14) {
+                illustration(step)
+                Text(step.title)
+                    .font(.system(size: 20, weight: .semibold))
+                    .multilineTextAlignment(.center)
+                    .accessibilityAddTraits(.isHeader)
+                Text(step.text)
+                    .font(.system(size: 13))
+                    .foregroundStyle(Brand.secondaryText)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+                if isLast {
+                    Text(tr("Puedes volver a verlo cuando quieras en Ayuda > Recorrido por Local Demo.",
+                            ca: "Pots tornar-lo a veure quan vulguis a Ajuda > Recorregut per Local Demo.",
+                            en: "You can see it again any time from Help > Local Demo Tour."))
+                        .font(.system(size: 12))
+                        .foregroundStyle(Brand.secondaryText)
+                        .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.top, 4)
+                }
+            }
+            .frame(maxWidth: .infinity, minHeight: 244, alignment: .top)
+            .id(index)
+            .transition(.opacity)
+            .accessibilityElement(children: .combine)
+
+            HStack {
+                dots
+                Spacer()
+                if index > 0 {
+                    Button(tr("Atrás", ca: "Enrere", en: "Back")) { go(-1) }
+                        .buttonStyle(PillButtonStyle(kind: .neutral))
+                        .focusRing(Capsule())
+                }
+                Button(isLast ? tr("Empezar", ca: "Comença", en: "Get Started") : tr("Siguiente", ca: "Següent", en: "Next")) {
+                    if isLast { onClose() } else { go(1) }
+                }
+                .buttonStyle(PillButtonStyle())
+                .focusRing(Capsule())
+                .keyboardShortcut(.defaultAction)   // Return moves forward
+                .focused($focused)
+            }
+            .padding(.top, 8)
+        }
+        .padding(24)
+        .frame(width: 440)
+        .background(Brand.canvas, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .shadow(color: .black.opacity(0.2), radius: 24, y: 10)
+        .accessibilityElement(children: .contain)
+        .accessibilityAddTraits(.isModal)
+        .onAppear { DispatchQueue.main.async { focused = true } }
+    }
+
+    @ViewBuilder
+    private func illustration(_ step: Step) -> some View {
+        Group {
+            if let symbol = step.symbol {
+                Image(systemName: symbol)
+                    .font(.system(size: 34, weight: .regular))
+                    .foregroundStyle(Brand.accentText)
+                    .frame(width: 84, height: 84)
+                    .background(Brand.card, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+            } else {
+                Image(nsImage: NSApp.applicationIconImage)
+                    .resizable()
+                    .frame(width: 96, height: 96)
+            }
+        }
+        .frame(height: 96)
+        .accessibilityHidden(true)
+    }
+
+    /// Page dots: the current one is a longer pink pill. Clicking one jumps to that step.
+    private var dots: some View {
+        HStack(spacing: 6) {
+            ForEach(steps.indices, id: \.self) { i in
+                Capsule()
+                    .fill(i == index ? Brand.accent : Brand.pillHover)
+                    .frame(width: i == index ? 18 : 7, height: 7)
+                    .contentShape(Rectangle().inset(by: -4))
+                    .onTapGesture { go(i - index) }
+            }
+        }
+        .accessibilityElement()
+        .accessibilityLabel(stepLabel)
+    }
+
+    private func go(_ delta: Int) {
+        let next = max(0, min(steps.count - 1, index + delta))
+        guard next != index else { return }
+        withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.2)) { index = next }
+        announce("\(stepLabel): \(steps[next].title)")
+        focused = true
     }
 }
 
